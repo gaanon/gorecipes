@@ -30,10 +30,10 @@
 			displayedRecipes = data.recipes;
 			currentPage = data.page;
 		}
-		if (data.currentTags !== filterTagsInput && data.page === 1) {
-			// If tags changed and we are on page 1 of new results, update input
-			filterTagsInput = data.currentTags || '';
-		}
+		// Removed problematic block that reset filterTagsInput
+		// The initial declaration `let filterTagsInput = data.currentTags || '';`
+		// and `bind:value` on the input should handle synchronization correctly
+		// when `data` (and thus `data.currentTags`) is updated from the load function.
 	}
 
 

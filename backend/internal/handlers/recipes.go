@@ -332,6 +332,7 @@ func ListRecipes(c *gin.Context) {
 			}
 		}
 	}
+	log.Printf("[ListRecipes] Received tagsQuery: '%s', Parsed filterTags: %v", tagsQuery, filterTags) // DEBUG LOGGING
 
 	err := database.DB.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -353,11 +354,16 @@ func ListRecipes(c *gin.Context) {
 			}
 
 			if len(filterTags) > 0 {
+				// Log details of the recipe being checked
+				log.Printf("[ListRecipes] Checking Recipe - ID: %s, Name: '%s', Ingredients: %v. Against filterTags: %v", recipe.ID, recipe.Name, recipe.Ingredients, filterTags)
 				if containsAnyTag(recipe.Ingredients, filterTags) {
+					log.Printf("[ListRecipes] Match FOUND for Recipe ID: %s, Name: '%s'. Adding to results.", recipe.ID, recipe.Name)
 					filteredRecipes = append(filteredRecipes, recipe)
+				} else {
+					log.Printf("[ListRecipes] No match for Recipe ID: %s, Name: '%s'.", recipe.ID, recipe.Name)
 				}
 			} else {
-				filteredRecipes = append(filteredRecipes, recipe)
+				filteredRecipes = append(filteredRecipes, recipe) // Add if no filters are active
 			}
 		}
 		return nil
@@ -433,19 +439,26 @@ func ListRecipes(c *gin.Context) {
 }
 
 // containsAnyTag checks if the recipeIngredients list contains at least one tag from the filterTags list.
-func containsAnyTag(recipeIngredients []string, filterTags []string) bool {
+// It now accepts recipeID for logging purposes.
+func containsAnyTag(recipeID string, recipeIngredients []string, filterTags []string) bool {
 	if len(filterTags) == 0 {
-		return true
+		return true // Should not happen if called from ListRecipes where len(filterTags) > 0
 	}
 	normalizedRecipeIngredients := make(map[string]bool)
 	for _, ing := range recipeIngredients {
 		normalizedRecipeIngredients[strings.ToLower(strings.TrimSpace(ing))] = true
 	}
+	log.Printf("[containsAnyTag] Recipe ID: %s, Normalized Recipe Ingredients: %v || Filter Tags: %v", recipeID, normalizedRecipeIngredients, filterTags)
+
 	for _, filterTag := range filterTags {
-		if normalizedRecipeIngredients[strings.ToLower(strings.TrimSpace(filterTag))] {
+		// filterTags are already normalized in ListRecipes, but re-normalizing here is safe.
+		normalizedFilterTag := strings.ToLower(strings.TrimSpace(filterTag))
+		if _, ok := normalizedRecipeIngredients[normalizedFilterTag]; ok {
+			log.Printf("[containsAnyTag] Match FOUND for Recipe ID: %s. Recipe ingredient '%s' matches filter tag '%s' (original filter tag: '%s')", recipeID, normalizedFilterTag, normalizedFilterTag, filterTag)
 			return true
 		}
 	}
+	log.Printf("[containsAnyTag] No match found for Recipe ID: %s after checking all filter tags against recipe ingredients.", recipeID)
 	return false
 }
 
