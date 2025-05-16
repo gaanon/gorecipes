@@ -50,8 +50,8 @@
 	}
 
 	.admin-nav li a:hover {
-		background-color: var(--color-primary-light);
-		color: var(--color-text); /* Ensure text is visible on hover */
+		background-color: var(--color-primary); /* Use primary green for background */
+		color: var(--color-surface); /* Use white for text (contrasts with green) */
 		color: var(--color-surface);
 	}
 </style>
