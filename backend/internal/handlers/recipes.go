@@ -14,6 +14,7 @@ import (
 	"net/url" // Added for Pexels integration (URL encoding)
 	"os"
 	"path/filepath"
+	"regexp"  // Added for ingredient parsing
 	"sort"    // Added for sorting recipes
 	"strconv" // Added for pagination
 	"strings"
@@ -184,6 +185,135 @@ func saveUploadedFile(file *multipart.FileHeader, dst string) error {
 	return err
 }
 
+var (
+	// commonUnits is a list of common units of measurement to remove.
+	// This list can be expanded.
+	commonUnits = []string{
+		"g", "kg", "mg", "oz", "lb", "lbs",
+		"ml", "l", "cl", "dl",
+		"tsp", "tbsp", "fl oz", "cup", "cups", "pt", "qt", "gal",
+		"pinch", "dash", "clove", "cloves", "head", "heads",
+		"slice", "slices", "piece", "pieces",
+		// Fractional words
+		"half", "quarter",
+	}
+
+	// commonDescriptors is a list of common adjectives or preparation states to remove.
+	// This list can be expanded.
+	commonDescriptors = []string{
+		"fresh", "dried", "frozen", "canned", "cooked", "uncooked", "raw",
+		"chopped", "diced", "sliced", "minced", "grated", "crushed", "peeled", "seeded",
+		"large", "medium", "small",
+		"ripe", "unripe",
+		"optional", "to taste", "for garnish",
+		"plain", "all-purpose", "self-raising", "whole", "ground", "granulated", "powdered",
+		"boneless", "skinless",
+		"finely", "coarsely", "roughly",
+		"hot", "cold", "warm", "chilled",
+		"sweet", "unsweetened", "salted", "unsalted",
+	}
+
+	// commonStopWords are words that are generally not useful for filtering.
+	// This list can be expanded.
+	commonStopWords = []string{
+		"a", "an", "the", "of", "and", "or", "with", "without", "in", "on", "at", "for", "to", "from",
+		"some", "any", "about", "into", "over", "under",
+	}
+)
+
+// normalizeAndCleanToken prepares a token by lowercasing and trimming.
+func normalizeAndCleanToken(token string) string {
+	return strings.ToLower(strings.TrimSpace(token))
+}
+
+// removeSubstrings removes all occurrences of given substrings from a string.
+func removeSubstrings(s string, substrings []string) string {
+	for _, sub := range substrings {
+		// Use word boundaries for units and descriptors to avoid partial matches in words
+		// e.g., removing "g" from "garlic"
+		// Regex for word boundary: \b
+		// However, simple Replace might be okay for a first pass if lists are curated.
+		// For more precision, regex would be better: regexp.MustCompile(`\b` + regexp.QuoteMeta(sub) + `\b`)
+		// For now, let's do a simpler replace, but be mindful of this.
+		// To be safer, add spaces around the substrings to be removed if they are standalone words.
+		s = strings.ReplaceAll(s, " "+sub+" ", " ") // for words in the middle
+		s = strings.ReplaceAll(s, sub+" ", " ")     // for words at the beginning (after number removal)
+		s = strings.ReplaceAll(s, " "+sub, " ")     // for words at the end
+	}
+	return s
+}
+
+// extractFilterableNames attempts to extract core ingredient names from a full ingredient string.
+// Example: "180g plain flour, finely chopped" -> ["plain flour", "flour"]
+func extractFilterableNames(fullIngredient string) []string {
+	if strings.TrimSpace(fullIngredient) == "" {
+		return nil
+	}
+
+	// 1. Lowercase
+	processed := strings.ToLower(fullIngredient)
+
+	// 2. Remove quantities (numbers and common fractions like 1/2, 1 1/2)
+	// Regex to remove numbers, fractions, and mixed numbers.
+	// This regex handles: "1", "1.5", "1/2", "1 1/2", "1-2"
+	reNum := regexp.MustCompile(`\d+(\s*[-/]\s*\d+)?(\.\d+)?(\s+\d+/\d+)?`)
+	processed = reNum.ReplaceAllString(processed, "")
+
+	// 3. Remove common units
+	processed = removeSubstrings(processed, commonUnits)
+
+	// 4. Remove common descriptors
+	processed = removeSubstrings(processed, commonDescriptors)
+
+	// 5. Split into words, remove stop words, and collect remaining.
+	// Also, consider multi-word ingredient names that might remain.
+	potentialNames := make(map[string]bool)
+
+	// Add the processed string as a whole, if it's meaningful
+	trimmedProcessed := strings.TrimSpace(processed)
+	// Replace multiple spaces with a single space
+	trimmedProcessed = regexp.MustCompile(`\s+`).ReplaceAllString(trimmedProcessed, " ")
+	if len(trimmedProcessed) > 2 { // Arbitrary length to avoid very short/meaningless "names"
+		potentialNames[trimmedProcessed] = true
+	}
+
+	// Split into individual words and add them if not stop words
+	words := strings.Fields(trimmedProcessed)
+	for _, word := range words {
+		cleanedWord := normalizeAndCleanToken(word)
+		isStopWord := false
+		for _, stop := range commonStopWords {
+			if cleanedWord == stop {
+				isStopWord = true
+				break
+			}
+		}
+		if !isStopWord && len(cleanedWord) > 2 { // Arbitrary length
+			potentialNames[cleanedWord] = true
+		}
+	}
+
+	if len(potentialNames) == 0 && len(words) > 0 {
+		// Fallback: if after all filtering nothing is left, but there were words,
+		// maybe the original string (just lowercased and trimmed) is the best we can do.
+		// This handles cases where an ingredient is just "salt" or "pepper".
+		originalTrimmed := normalizeAndCleanToken(fullIngredient)
+		// Remove numbers from this fallback too
+		originalTrimmed = reNum.ReplaceAllString(originalTrimmed, "")
+		originalTrimmed = regexp.MustCompile(`\s+`).ReplaceAllString(strings.TrimSpace(originalTrimmed), " ")
+		if len(originalTrimmed) > 1 {
+			potentialNames[originalTrimmed] = true
+		}
+	}
+
+	// Convert map to slice
+	var result []string
+	for name := range potentialNames {
+		result = append(result, name)
+	}
+	return result
+}
+
 // CreateRecipe handles the creation of a new recipe.
 // POST /api/v1/recipes - expects multipart/form-data
 func CreateRecipe(c *gin.Context) {
@@ -203,18 +333,30 @@ func CreateRecipe(c *gin.Context) {
 		return
 	}
 
+	// Initialize Ingredients and FilterableIngredientNames
+	recipe.Ingredients = []string{}
+	recipe.FilterableIngredientNames = []string{}
+
+	uniqueFilterableNames := make(map[string]bool)
+
 	if ingredientsStr != "" {
 		rawIngredients := strings.Split(ingredientsStr, ",")
 		for _, ing := range rawIngredients {
 			trimmedIng := strings.TrimSpace(ing)
 			if trimmedIng != "" {
 				recipe.Ingredients = append(recipe.Ingredients, trimmedIng)
+				// Extract and add filterable names
+				filterable := extractFilterableNames(trimmedIng)
+				for _, fname := range filterable {
+					if fname != "" && !uniqueFilterableNames[fname] {
+						recipe.FilterableIngredientNames = append(recipe.FilterableIngredientNames, fname)
+						uniqueFilterableNames[fname] = true
+					}
+				}
 			}
 		}
 	}
-	if recipe.Ingredients == nil { // Ensure it's an empty slice not nil if no ingredients
-		recipe.Ingredients = []string{}
-	}
+	// No need to check for nil recipe.Ingredients as it's initialized
 
 	file, errFile := c.FormFile("photo")
 	if errFile == nil {
@@ -355,8 +497,8 @@ func ListRecipes(c *gin.Context) {
 
 			if len(filterTags) > 0 {
 				// Log details of the recipe being checked
-				log.Printf("[ListRecipes] Checking Recipe - ID: %s, Name: '%s', Ingredients: %v. Against filterTags: %v", recipe.ID, recipe.Name, recipe.Ingredients, filterTags)
-				if containsAnyTag(recipe.Ingredients, filterTags) {
+				log.Printf("[ListRecipes] Checking Recipe - ID: %s, Name: '%s', FilterableIngredientNames: %v. Against filterTags: %v", recipe.ID, recipe.Name, recipe.FilterableIngredientNames, filterTags)
+				if containsAnyTag(recipe.ID, recipe.FilterableIngredientNames, filterTags) {
 					log.Printf("[ListRecipes] Match FOUND for Recipe ID: %s, Name: '%s'. Adding to results.", recipe.ID, recipe.Name)
 					filteredRecipes = append(filteredRecipes, recipe)
 				} else {
@@ -445,20 +587,25 @@ func containsAnyTag(recipeID string, recipeIngredients []string, filterTags []st
 		return true // Should not happen if called from ListRecipes where len(filterTags) > 0
 	}
 	normalizedRecipeIngredients := make(map[string]bool)
-	for _, ing := range recipeIngredients {
-		normalizedRecipeIngredients[strings.ToLower(strings.TrimSpace(ing))] = true
+	// recipeIngredients now refers to recipe.FilterableIngredientNames, which are already somewhat processed.
+	// Normalizing them again here is fine and ensures consistency.
+	for _, name := range recipeIngredients { // Changed 'ing' to 'name' for clarity
+		normalizedRecipeIngredients[strings.ToLower(strings.TrimSpace(name))] = true
 	}
-	log.Printf("[containsAnyTag] Recipe ID: %s, Normalized Recipe Ingredients: %v || Filter Tags: %v", recipeID, normalizedRecipeIngredients, filterTags)
+	// Updated log to reflect that we are dealing with FilterableIngredientNames
+	log.Printf("[containsAnyTag] Recipe ID: %s, Normalized Filterable Names: %v || Filter Tags: %v", recipeID, normalizedRecipeIngredients, filterTags)
 
 	for _, filterTag := range filterTags {
-		// filterTags are already normalized in ListRecipes, but re-normalizing here is safe.
+		// filterTags are already normalized in ListRecipes.
+		// No need to re-normalize filterTag here if ListRecipes guarantees it.
+		// However, for safety, let's keep it:
 		normalizedFilterTag := strings.ToLower(strings.TrimSpace(filterTag))
 		if _, ok := normalizedRecipeIngredients[normalizedFilterTag]; ok {
-			log.Printf("[containsAnyTag] Match FOUND for Recipe ID: %s. Recipe ingredient '%s' matches filter tag '%s' (original filter tag: '%s')", recipeID, normalizedFilterTag, normalizedFilterTag, filterTag)
+			log.Printf("[containsAnyTag] Match FOUND for Recipe ID: %s. Filterable name '%s' matches filter tag '%s'", recipeID, normalizedFilterTag, filterTag)
 			return true
 		}
 	}
-	log.Printf("[containsAnyTag] No match found for Recipe ID: %s after checking all filter tags against recipe ingredients.", recipeID)
+	log.Printf("[containsAnyTag] No match found for Recipe ID: %s after checking all filter tags against recipe's filterable names.", recipeID)
 	return false
 }
 
@@ -543,7 +690,20 @@ func UpdateRecipe(c *gin.Context) {
 		oldPhotoFilename := existingRecipe.PhotoFilename
 
 		existingRecipe.Name = name
-		existingRecipe.Ingredients = updatedIngredients
+		// Process ingredients and filterable names
+		existingRecipe.Ingredients = updatedIngredients // This is already populated from lines 655-667
+		existingRecipe.FilterableIngredientNames = []string{}
+		uniqueFilterableNames := make(map[string]bool)
+		for _, ing := range existingRecipe.Ingredients { // Iterate over the already processed full ingredient strings
+			filterable := extractFilterableNames(ing)
+			for _, fname := range filterable {
+				if fname != "" && !uniqueFilterableNames[fname] {
+					existingRecipe.FilterableIngredientNames = append(existingRecipe.FilterableIngredientNames, fname)
+					uniqueFilterableNames[fname] = true
+				}
+			}
+		}
+
 		existingRecipe.Method = method
 		existingRecipe.UpdatedAt = time.Now().UTC()
 
@@ -711,4 +871,94 @@ func GetIngredientsAutocomplete(c *gin.Context) {
 		matchingIngredients = []string{}
 	}
 	c.JSON(http.StatusOK, matchingIngredients)
+}
+
+// MigrateRecipeIngredients handles a one-time migration to populate
+// the FilterableIngredientNames field for all existing recipes.
+// POST /api/v1/admin/migrate-ingredients (or similar)
+func MigrateRecipeIngredients(c *gin.Context) {
+	log.Println("Starting ingredient migration for existing recipes...")
+	var recipesToUpdate []models.Recipe
+	var keysToUpdate [][]byte // Store keys to update in a separate transaction if needed, or update one by one
+
+	// Phase 1: Read all recipes
+	errView := database.DB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true // We need the values
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		prefix := []byte("recipe:")
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			var recipe models.Recipe
+			errValue := item.Value(func(val []byte) error {
+				return json.Unmarshal(val, &recipe)
+			})
+			if errValue != nil {
+				log.Printf("Error unmarshalling recipe %s during migration scan: %v", item.Key(), errValue)
+				return errValue // Or continue to next item
+			}
+			recipesToUpdate = append(recipesToUpdate, recipe)
+			keysToUpdate = append(keysToUpdate, item.KeyCopy(nil))
+		}
+		return nil
+	})
+
+	if errView != nil {
+		log.Printf("Error reading recipes during migration: %v", errView)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read recipes for migration", "details": errView.Error()})
+		return
+	}
+
+	log.Printf("Found %d recipes to process for migration.", len(recipesToUpdate))
+	updatedCount := 0
+	errorCount := 0
+
+	// Phase 2: Process and update each recipe
+	for i, recipe := range recipesToUpdate {
+		key := keysToUpdate[i]
+
+		// Re-initialize FilterableIngredientNames for a clean slate during migration
+		recipe.FilterableIngredientNames = []string{}
+		uniqueFilterableNames := make(map[string]bool)
+
+		for _, ingStr := range recipe.Ingredients {
+			filterable := extractFilterableNames(ingStr)
+			for _, fname := range filterable {
+				if fname != "" && !uniqueFilterableNames[fname] {
+					recipe.FilterableIngredientNames = append(recipe.FilterableIngredientNames, fname)
+					uniqueFilterableNames[fname] = true
+				}
+			}
+		}
+		recipe.UpdatedAt = time.Now().UTC() // Update timestamp
+
+		recipeJSON, errMarshal := json.Marshal(recipe)
+		if errMarshal != nil {
+			log.Printf("Error marshalling recipe %s during migration update: %v", recipe.ID, errMarshal)
+			errorCount++
+			continue // Skip this recipe
+		}
+
+		errUpdate := database.DB.Update(func(txn *badger.Txn) error {
+			return txn.Set(key, recipeJSON)
+		})
+
+		if errUpdate != nil {
+			log.Printf("Error updating recipe %s during migration: %v", recipe.ID, errUpdate)
+			errorCount++
+		} else {
+			log.Printf("Successfully migrated ingredients for recipe ID: %s, Name: %s", recipe.ID, recipe.Name)
+			updatedCount++
+		}
+	}
+
+	log.Printf("Ingredient migration finished. Recipes updated: %d, Errors: %d", updatedCount, errorCount)
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "Ingredient migration process completed.",
+		"recipes_found":   len(recipesToUpdate),
+		"recipes_updated": updatedCount,
+		"errors":          errorCount,
+	})
 }

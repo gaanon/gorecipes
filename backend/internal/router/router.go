@@ -44,6 +44,12 @@ func SetupRouter() *gin.Engine {
 		{
 			ingredients.GET("", handlers.GetIngredientsAutocomplete) // e.g., /api/v1/ingredients?q=tomato
 		}
+
+		// Admin routes
+		admin := apiV1.Group("/admin")
+		{
+			admin.POST("/migrate-ingredients", handlers.MigrateRecipeIngredients)
+		}
 	}
 
 	// Serve static files (uploaded images)
