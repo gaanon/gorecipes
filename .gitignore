@@ -1,0 +1,30 @@
+# GoRecipes Project .gitignore
+
+# Ignore IDE and OS specific files
+.DS_Store
+*.idea/
+*.vscode/settings.json
+*.vscode/launch.json
+*.vscode/tasks.json
+
+# Ignore backend build artifacts (if any, e.g. compiled binary if not named 'main')
+# backend/main
+# backend/gorecipes-backend
+
+# Ignore uploaded images
+backend/uploads/images/
+
+# Ignore BadgerDB data files
+backend/badger_data/
+
+# Frontend specific ignores (already present in frontend/.gitignore, but good for root too)
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/.env
+frontend/.env.*
+frontend/!/.env.example
+
+# Log files
+*.log
+logs/
