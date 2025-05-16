@@ -49,6 +49,7 @@ func SetupRouter() *gin.Engine {
 		admin := apiV1.Group("/admin")
 		{
 			admin.POST("/migrate-ingredients", handlers.MigrateRecipeIngredients)
+			admin.POST("/export", handlers.ExportData) // New route for data export
 		}
 	}
 

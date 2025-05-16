@@ -13,6 +13,7 @@
 	<nav class="main-nav">
 		<a href="/" class:active={$page.url.pathname === '/'}>All Recipes</a>
 		<a href="/recipes/new" class:active={$page.url.pathname === '/recipes/new'}>Add Recipe</a>
+		<a href="/admin" class:active={$page.url.pathname.startsWith('/admin')}>Admin</a>
 		<!-- Add more links here as needed -->
 	</nav>
 </header>

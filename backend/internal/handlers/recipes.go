@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"archive/zip" // Added for image ZIP export
 	"bytes"
 	"encoding/json"
 	"fmt" // Added for Pexels integration
@@ -961,4 +962,228 @@ func MigrateRecipeIngredients(c *gin.Context) {
 		"recipes_updated": updatedCount,
 		"errors":          errorCount,
 	})
+}
+
+// ExportData handles requests to export recipes and/or images.
+// POST /api/v1/admin/export
+func ExportData(c *gin.Context) {
+	log.Println("Starting data export process...")
+
+	var options struct {
+		ExportRecipes bool `json:"export_recipes"`
+		// RecipeFormat  string `json:"recipe_format"` // Removed as we stick to JSON for now
+		ExportImages bool `json:"export_images"`
+	}
+
+	if err := c.ShouldBindJSON(&options); err != nil {
+		log.Printf("Error binding JSON for export options: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid export options provided", "details": err.Error()})
+		return
+	}
+
+	log.Printf("Export options received: ExportRecipes=%t, ExportImages=%t", options.ExportRecipes, options.ExportImages)
+
+	if !options.ExportRecipes && !options.ExportImages {
+		log.Println("No export type selected (recipes or images).")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select at least one item to export (recipes or images)."})
+		return
+	}
+
+	// Fetch all recipes once if either recipes or images are needed.
+	var allRecipes []models.Recipe
+	if options.ExportRecipes || options.ExportImages {
+		errView := database.DB.View(func(txn *badger.Txn) error {
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = true
+			it := txn.NewIterator(opts)
+			defer it.Close()
+			prefix := []byte("recipe:")
+			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+				item := it.Item()
+				var recipe models.Recipe
+				if err := item.Value(func(val []byte) error { return json.Unmarshal(val, &recipe) }); err != nil {
+					log.Printf("Error unmarshalling recipe %s during export scan: %v", item.Key(), err)
+					return err
+				}
+				allRecipes = append(allRecipes, recipe)
+			}
+			return nil
+		})
+		if errView != nil {
+			log.Printf("Error reading recipes for export: %v", errView)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read recipes for export", "details": errView.Error()})
+			return
+		}
+		if len(allRecipes) == 0 {
+			log.Println("No recipes found in the database.")
+			// Let specific handlers decide what to do with empty allRecipes list.
+		}
+	}
+
+	// Case 1: Export both Recipes (JSON) and Images (Combined ZIP)
+	if options.ExportRecipes && options.ExportImages {
+		log.Println("Combined export: Recipes (JSON) and Images.")
+		if len(allRecipes) == 0 {
+			log.Println("No recipes (and thus no recipe data or images) to export for combined ZIP.")
+			c.JSON(http.StatusOK, gin.H{"message": "No recipes found to include in the export."})
+			return
+		}
+
+		buf := new(bytes.Buffer)
+		zipWriter := zip.NewWriter(buf)
+
+		// Add recipes.json to ZIP
+		jsonData, errMarshal := json.MarshalIndent(allRecipes, "", "  ")
+		if errMarshal != nil {
+			log.Printf("Error marshalling recipes to JSON for combined ZIP: %v", errMarshal)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal recipes for ZIP"})
+			return
+		}
+		jsonFileInZip, errZipCreate := zipWriter.Create("recipes.json")
+		if errZipCreate != nil {
+			log.Printf("Error creating recipes.json in ZIP: %v", errZipCreate)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create recipe file in ZIP"})
+			return
+		}
+		_, errWriteJSON := jsonFileInZip.Write(jsonData)
+		if errWriteJSON != nil {
+			log.Printf("Error writing recipes.json to ZIP: %v", errWriteJSON)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write recipe data to ZIP"})
+			return
+		}
+
+		// Add images to ZIP (in an 'images/' folder within the zip)
+		uniqueImageFiles := make(map[string]bool)
+		for _, recipe := range allRecipes {
+			if recipe.PhotoFilename != "" && recipe.PhotoFilename != placeholderImage {
+				uniqueImageFiles[recipe.PhotoFilename] = true
+			}
+		}
+		log.Printf("Found %d unique images for combined ZIP.", len(uniqueImageFiles))
+
+		for filename := range uniqueImageFiles {
+			filePath := filepath.Join(uploadsDir, filename)
+			fileInfo, errStat := os.Stat(filePath)
+			if os.IsNotExist(errStat) {
+				log.Printf("Image file not found for ZIP, skipping: %s", filePath)
+				continue
+			}
+			if errStat != nil {
+				log.Printf("Error stating image file %s for ZIP, skipping: %v", filePath, errStat)
+				continue
+			}
+			if fileInfo.IsDir() {
+				log.Printf("Path is a directory, skipping image for ZIP: %s", filePath)
+				continue
+			}
+
+			imgData, errRead := os.ReadFile(filePath)
+			if errRead != nil {
+				log.Printf("Error reading image file %s for ZIP: %v", filePath, errRead)
+				continue
+			}
+
+			// Store images in an "images" folder within the zip
+			imageFileInZip, errZipImgCreate := zipWriter.Create("images/" + filename)
+			if errZipImgCreate != nil {
+				log.Printf("Error creating image entry %s in ZIP: %v", filename, errZipImgCreate)
+				continue
+			}
+			_, errWriteImg := imageFileInZip.Write(imgData)
+			if errWriteImg != nil {
+				log.Printf("Error writing image %s to ZIP: %v", filename, errWriteImg)
+				continue
+			}
+		}
+
+		if err := zipWriter.Close(); err != nil {
+			log.Printf("Error closing zip writer for combined export: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize combined export archive"})
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=gorecipes_export.zip")
+		c.Header("Content-Type", "application/zip")
+		c.Data(http.StatusOK, "application/zip", buf.Bytes())
+		log.Println("Combined recipes and images ZIP export completed successfully.")
+		return
+
+		// Case 2: Export Recipes only (JSON)
+	} else if options.ExportRecipes {
+		log.Println("Exporting Recipes only (JSON).")
+		if len(allRecipes) == 0 {
+			log.Println("No recipes found to export as JSON.")
+			// Return empty JSON array for consistency with file download
+		}
+		jsonData, errMarshal := json.MarshalIndent(allRecipes, "", "  ")
+		if errMarshal != nil {
+			log.Printf("Error marshalling recipes to JSON for export: %v", errMarshal)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal recipes to JSON"})
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=recipes.json")
+		c.Data(http.StatusOK, "application/json; charset=utf-8", jsonData)
+		log.Println("Recipe JSON export completed successfully.")
+		return
+
+		// Case 3: Export Images only (ZIP)
+	} else if options.ExportImages {
+		log.Println("Exporting Images only (ZIP).")
+		uniqueImageFiles := make(map[string]bool)
+		for _, recipe := range allRecipes { // allRecipes is already fetched
+			if recipe.PhotoFilename != "" && recipe.PhotoFilename != placeholderImage {
+				uniqueImageFiles[recipe.PhotoFilename] = true
+			}
+		}
+		if len(uniqueImageFiles) == 0 {
+			log.Println("No images found to export.")
+			c.JSON(http.StatusOK, gin.H{"message": "No images found to export."})
+			return
+		}
+		log.Printf("Found %d unique images for image-only ZIP.", len(uniqueImageFiles))
+		buf := new(bytes.Buffer)
+		zipWriter := zip.NewWriter(buf)
+		for filename := range uniqueImageFiles {
+			filePath := filepath.Join(uploadsDir, filename)
+			fileInfo, errStat := os.Stat(filePath)
+			if os.IsNotExist(errStat) {
+				log.Printf("Image file not found for ZIP, skipping: %s", filePath)
+				continue
+			}
+			if errStat != nil {
+				log.Printf("Error stating image file %s for ZIP, skipping: %v", filePath, errStat)
+				continue
+			}
+			if fileInfo.IsDir() {
+				log.Printf("Path is a directory, skipping image for ZIP: %s", filePath)
+				continue
+			}
+
+			imgData, errRead := os.ReadFile(filePath)
+			if errRead != nil {
+				log.Printf("Error reading image file %s for zipping: %v", filePath, errRead)
+				continue
+			}
+
+			f, errZip := zipWriter.Create(filename)
+			if errZip != nil {
+				log.Printf("Error creating zip entry for %s: %v", filename, errZip)
+				continue
+			}
+			_, errWrite := f.Write(imgData)
+			if errWrite != nil {
+				log.Printf("Error writing image data to zip for %s: %v", filename, errWrite)
+				continue
+			}
+		}
+		if err := zipWriter.Close(); err != nil {
+			log.Printf("Error closing zip writer for image-only export: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize image archive"})
+			return
+		}
+		c.Header("Content-Disposition", "attachment; filename=recipe_images.zip")
+		c.Header("Content-Type", "application/zip")
+		c.Data(http.StatusOK, "application/zip", buf.Bytes())
+		log.Println("Image ZIP export completed successfully.")
+		return
+	}
 }
