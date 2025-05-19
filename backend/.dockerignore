@@ -1,0 +1,17 @@
+# Git files
+.git
+.gitignore
+
+# Local development artifacts
+tmp/
+*.log
+*.out
+
+# Local data and uploads - these should be managed by volumes in production
+data/
+uploads/
+
+# IDE and OS specific files
+.vscode/
+.idea/
+*.DS_Store

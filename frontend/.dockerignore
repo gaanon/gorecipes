@@ -1,0 +1,29 @@
+# Git files
+.git
+.gitignore
+
+# Node.js dependencies - these are installed during the Docker build
+node_modules/
+
+# SvelteKit build artifacts and cache - these are generated during the Docker build
+.svelte-kit/
+build/
+dist/ # If you ever use a different adapter that outputs here
+
+# Local development environment files
+.env
+*.env
+*.env.*
+!*.env.example
+
+# IDE and OS specific files
+.vscode/
+.idea/
+*.DS_Store
+
+# Log files
+*.log
+logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -1,0 +1,44 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: gaanon/gorecipes-backend:local # Using a local tag to avoid conflict with CI pushes
+    container_name: gorecipes-backend-dev
+    ports:
+      - "8080:8080" # Expose backend port
+    environment:
+      - PEXELS_API_KEY=${PEXELS_API_KEY} # Define Pexels API Key from .env file or shell
+    volumes:
+      - gorecipes_badger_data:/app/data/badger # Named volume for BadgerDB data
+      - gorecipes_uploads:/app/uploads/images # Named volume for uploaded images
+      # For local development, you might want to mount your source code
+      # to see changes without rebuilding the image (if your Go setup supports hot reload or you restart manually)
+      # - ./backend:/app # Be cautious with this in Go as it's a compiled language
+    restart: unless-stopped
+    networks:
+      - gorecipes-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: gaanon/gorecipes-frontend:local # Using a local tag
+    container_name: gorecipes-frontend-dev
+    ports:
+      - "5173:80" # Map host port 5173 to Nginx container port 80
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - gorecipes-net
+
+volumes:
+  gorecipes_badger_data: # Defines the named volume for BadgerDB
+    driver: local
+  gorecipes_uploads:     # Defines the named volume for uploads
+    driver: local
+
+networks:
+  gorecipes-net:
+    driver: bridge
