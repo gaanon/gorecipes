@@ -3,7 +3,7 @@ name: Build and Push Docker Images
 on:
   push:
     branches:
-      - main # Or your primary branch, e.g., master
+      - main
 
 jobs:
   build_and_push_backend:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write # Required to push to Docker Hub (or GHCR if used)
+      packages: write
 
     steps:
       - name: Checkout code
@@ -33,9 +33,9 @@ jobs:
         id: meta_backend
         uses: docker/metadata-action@v5
         with:
-          images: gaanon/gorecipes-backend # Your Docker Hub username and image name
+          images: gaanon/gorecipes-backend
           tags: |
-            type=sha,prefix=sha-,format=short # sha-shortcommitsha
+            type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push backend image
@@ -44,6 +44,7 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta_backend.outputs.tags }}
           labels: ${{ steps.meta_backend.outputs.labels }}
           cache-from: type=gha
@@ -76,18 +77,20 @@ jobs:
         id: meta_frontend
         uses: docker/metadata-action@v5
         with:
-          images: gaanon/gorecipes-frontend # Your Docker Hub username and image name
+          images: gaanon/gorecipes-frontend
           tags: |
-            type=sha,prefix=sha-,format=short # sha-shortcommitsha
+            type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
-            
+
       - name: Build and push frontend image
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta_frontend.outputs.tags }}
           labels: ${{ steps.meta_frontend.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
