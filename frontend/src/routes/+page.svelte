@@ -4,6 +4,7 @@
 	import type { PageData } from './$types';
 	import type { Recipe, PaginatedRecipesResponse } from '$lib/types';
 	import RecipeCard from '$lib/components/RecipeCard.svelte';
+	import MealPlannerPanel from '$lib/components/MealPlannerPanel.svelte'; // Added
 
 	export let data: PageData;
 
@@ -12,6 +13,7 @@
 	let currentPage: number = 1;
 	let isLoadingMore = false;
 	let filterTagsInput = data.currentTags || '';
+	let isPlannerVisible = false; // Added for planner visibility
 
 	// Initialize displayedRecipes when data first loads or changes significantly (e.g., filter applied)
 	$: {
@@ -84,6 +86,9 @@
 		{#if data.currentTags}
 			<p class="filter-indicator-standalone">Filtered by: {data.currentTags}</p>
 		{/if}
+		<button class="button planner-toggle-button" on:click={() => isPlannerVisible = !isPlannerVisible}>
+			{isPlannerVisible ? 'Hide' : 'Show'} Planner
+		</button>
 	</div>
 
 	<form class="filter-form" on:submit|preventDefault={applyFilter}>
@@ -139,6 +144,8 @@
 	{/if}
 </div>
 
+<MealPlannerPanel bind:isVisible={isPlannerVisible} />
+
 <style>
 	/* .page-container is now .main-container from app.css */
 
@@ -157,9 +164,20 @@
 		font-weight: 500;
 		color: var(--color-text-light);
 		margin-bottom: 15px; /* Add some space below if it's the only thing in header */
-		text-align: center; /* Center it if it's standalone */
-		width: 100%; /* Ensure it takes full width for centering */
+		/* text-align: center; */ /* Adjusted for new button */
+		/* width: 100%; */ /* Adjusted for new button */
 	}
+	.planner-toggle-button {
+		/* Basic styling, can be improved */
+		background-color: var(--color-accent, #ff9800);
+		color: white;
+		padding: 8px 15px;
+		font-size: 0.9em;
+	}
+	.planner-toggle-button:hover {
+		background-color: #e68a00; /* Darker accent */
+	}
+
 
 	/* .create-recipe-button styles removed as the button is gone */
 

@@ -1,19 +1,28 @@
 <script lang="ts">
 	import type { Recipe } from '$lib/types';
+	import AddToPlanModal from '$lib/components/AddToPlanModal.svelte'; // Added
 
 	export let recipe: Recipe;
+	let showAddToPlanModal = false; // Added
 
 	// Construct the image URL. Assuming backend is running on localhost:8080
 	// and images are served from /uploads/images/
 	// This might need to be configurable later (e.g., via environment variables)
 	const baseImageUrl = 'http://localhost:8080/uploads/images/';
 	$: imageUrl = recipe.photo_filename ? `${baseImageUrl}${recipe.photo_filename}` : ''; // Handle missing photo_filename gracefully
+
+	function openAddToPlanModal(event: MouseEvent) {
+		event.preventDefault(); // Prevent link navigation if button is inside <a>
+		event.stopPropagation(); // Prevent event bubbling
+		showAddToPlanModal = true;
+	}
 </script>
 
-<a href="/recipes/{recipe.id}" class="recipe-card-link">
-	<div class="recipe-card">
-		<div class="photo-container">
-			{#if imageUrl}
+<div class="recipe-card-wrapper">
+	<a href="/recipes/{recipe.id}" class="recipe-card-link">
+		<div class="recipe-card">
+			<div class="photo-container">
+				{#if imageUrl}
 				<img src={imageUrl} alt={recipe.name} class="recipe-photo" />
 			{:else}
 				<div class="recipe-photo-placeholder">
@@ -27,9 +36,57 @@
 			<span class="view-details-button">View Recipe</span>
 		</div>
 	</div>
-</a>
+	</a>
+	<button class="add-to-plan-flt-btn" on:click={openAddToPlanModal} title="Add to Meal Plan">
+		<span>+</span>📅
+	</button>
+</div>
+
+{#if showAddToPlanModal}
+	<AddToPlanModal
+		bind:showModal={showAddToPlanModal}
+		recipeId={recipe.id}
+		recipeName={recipe.name}
+		on:close={() => showAddToPlanModal = false}
+	/>
+{/if}
 
 <style>
+	.recipe-card-wrapper {
+		position: relative; /* For positioning the floating button */
+		display: block; /* Or inline-block, depending on layout needs */
+	}
+	.recipe-card-wrapper .add-to-plan-flt-btn {
+		position: absolute;
+		top: 10px;
+		right: 10px;
+		z-index: 10;
+		background-color: var(--color-accent, #ff9800);
+		color: white;
+		border: none;
+		border-radius: 50%;
+		width: 40px;
+		height: 40px;
+		font-size: 1.2em; /* Adjust icon size */
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		box-shadow: var(--shadow-md);
+		opacity: 0; /* Hidden by default */
+		transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+		transform: scale(0.8);
+	}
+	.recipe-card-wrapper:hover .add-to-plan-flt-btn {
+		opacity: 1; /* Show on hover */
+		transform: scale(1);
+	}
+	.add-to-plan-flt-btn span {
+		position: relative;
+		top: -1px; /* Fine-tune icon position */
+	}
+
+
 	.recipe-card-link {
 		text-decoration: none; /* Remove underline from the link wrapping the card */
 		color: inherit; /* Inherit text color */

@@ -115,9 +115,9 @@
 			</div>
 
 			<div class="form-group">
-				<label class="form-label">Current Photo:</label>
+				<div class="form-label">Current Photo:</div>
 				{#if currentImageUrl}
-					<img src={currentImageUrl} alt="Current recipe photo" class="current-photo-preview" />
+					<img src={currentImageUrl} alt={`Preview of current photo: ${currentPhotoFilename}`} class="current-photo-preview" />
 					<p><small class="form-hint">Filename: {currentPhotoFilename}</small></p>
 				{:else}
 					<p class="form-hint">No current photo.</p>

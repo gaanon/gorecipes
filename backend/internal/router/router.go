@@ -57,6 +57,14 @@ func SetupRouter() *gin.Engine {
 			admin.POST("/export", handlers.ExportData)    // New route for data export
 			admin.POST("/import", handlers.ImportRecipes) // New route for data import
 		}
+
+		// Meal Planner routes
+		mealPlanner := apiV1.Group("/mealplanner")
+		{
+			mealPlanner.POST("/entries", handlers.CreateMealPlanEntryHandler)             // POST /api/v1/mealplanner/entries
+			mealPlanner.GET("/entries", handlers.ListMealPlanEntriesHandler)              // GET  /api/v1/mealplanner/entries
+			mealPlanner.DELETE("/entries/:entry_id", handlers.DeleteMealPlanEntryHandler) // DELETE /api/v1/mealplanner/entries/:entry_id
+		}
 	}
 
 	// Serve static files (uploaded images)

@@ -250,10 +250,12 @@
 		color: var(--color-text-light);
 		white-space: pre-wrap;
 	}
-	.method-text ::selection { /* Style selected text in method */
+	/*
+	.method-text ::selection { // Style selected text in method
 		background-color: var(--color-secondary);
 		color: var(--color-text);
 	}
+	*/
 
 	.empty-state-text {
 		font-style: italic;
@@ -342,7 +344,7 @@
 		border-radius: var(--border-radius);
 		font-weight: 500;
 	}
-	.message svg { margin-right: 10px; flex-shrink: 0; }
+	/* .message svg { margin-right: 10px; flex-shrink: 0; } */
 	.error-message {
 		background-color: #fdecea;
 		color: var(--color-error);
