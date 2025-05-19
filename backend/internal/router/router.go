@@ -29,14 +29,19 @@ func SetupRouter() *gin.Engine {
 	apiV1 := router.Group("/api/v1")
 	{
 		// Recipe routes
-		recipes := apiV1.Group("/recipes")
+		recipesBase := apiV1.Group("/recipes")
 		{
-			recipes.POST("", handlers.CreateRecipe)
-			recipes.GET("", handlers.ListRecipes)
-			recipes.GET("/:id", handlers.GetRecipe)
-			recipes.PUT("/:id", handlers.UpdateRecipe)
-			recipes.DELETE("/:id", handlers.DeleteRecipe)
-			// recipes.POST("/:id/image", handlers.UploadRecipeImage) // Example for specific image upload route
+			recipesBase.POST("", handlers.CreateRecipe) // POST /api/v1/recipes
+			recipesBase.GET("", handlers.ListRecipes)   // GET  /api/v1/recipes
+
+			// Routes for a specific recipe, e.g., /api/v1/recipes/:id
+			recipeWithID := recipesBase.Group("/:id")
+			{
+				recipeWithID.GET("", handlers.GetRecipe)       // GET    /api/v1/recipes/:id
+				recipeWithID.PUT("", handlers.UpdateRecipe)    // PUT    /api/v1/recipes/:id
+				recipeWithID.DELETE("", handlers.DeleteRecipe) // DELETE /api/v1/recipes/:id
+				// recipeWithID.POST("/image", handlers.UploadRecipeImage) // Example for specific image upload
+			}
 		}
 
 		// Ingredient routes
@@ -49,7 +54,8 @@ func SetupRouter() *gin.Engine {
 		admin := apiV1.Group("/admin")
 		{
 			admin.POST("/migrate-ingredients", handlers.MigrateRecipeIngredients)
-			admin.POST("/export", handlers.ExportData) // New route for data export
+			admin.POST("/export", handlers.ExportData)    // New route for data export
+			admin.POST("/import", handlers.ImportRecipes) // New route for data import
 		}
 	}
 

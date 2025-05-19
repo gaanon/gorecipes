@@ -11,6 +11,9 @@
 			<li>
 				<a href="/admin/export">Export Data</a>
 			</li>
+			<li>
+				<a href="/admin/import">Import Recipes</a>
+			</li>
 			<!-- More admin tasks can be added here -->
 		</ul>
 	</nav>

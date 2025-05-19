@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Recipe } from '$lib/types';
+	// import RecipeComments from '$lib/components/RecipeComments.svelte'; // Comment import removed
 
 	export let data: PageData;
 
@@ -122,6 +123,13 @@
 			{#if deleteError}
 				<div class="message error-message delete-error-feedback">{deleteError}</div>
 			{/if}
+
+			<!-- Comments Section Removed -->
+			<!--
+			<section class="comments-container-section">
+				<RecipeComments recipeId={recipe.id} />
+			</section>
+			-->
 		</article>
 
 	{:else if error}
@@ -151,6 +159,8 @@
 		overflow: hidden; /* Important for image border radius */
 		margin-top: 20px;
 	}
+
+	/* .comments-container-section removed */
 
 	.recipe-title {
 		font-size: 2.4em;

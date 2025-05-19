@@ -10,7 +10,7 @@ services:
     environment:
       - PEXELS_API_KEY=${PEXELS_API_KEY} # Define Pexels API Key from .env file or shell
     volumes:
-      - gorecipes_badger_data:/app/data/badger # Named volume for BadgerDB data
+      - gorecipes_badger_data:/app/data/badgerdb # Corrected path for BadgerDB data
       - gorecipes_uploads:/app/uploads/images # Named volume for uploaded images
       # For local development, you might want to mount your source code
       # to see changes without rebuilding the image (if your Go setup supports hot reload or you restart manually)
