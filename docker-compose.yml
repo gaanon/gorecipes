@@ -9,6 +9,7 @@ services:
       - "8080:8080" # Expose backend port
     environment:
       - PEXELS_API_KEY=${PEXELS_API_KEY} # Define Pexels API Key from .env file or shell
+      - HOST=0.0.0.0
     volumes:
       - gorecipes_badger_data:/app/data/badgerdb # Corrected path for BadgerDB data
       - gorecipes_uploads:/app/uploads/images # Named volume for uploaded images
@@ -25,6 +26,9 @@ services:
       dockerfile: Dockerfile
     image: gaanon/gorecipes-frontend:local # Using a local tag
     container_name: gorecipes-frontend-dev
+    environment:
+      - VITE_API_BASE_URL=/api
+      - BACKEND_URL=http://backend:8080
     ports:
       - "5173:80" # Map host port 5173 to Nginx container port 80
     depends_on:

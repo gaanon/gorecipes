@@ -37,8 +37,13 @@ func main() {
 		port = "8080" // Default port
 	}
 
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0" // Default to all interfaces
+	}
+
 	srv := &http.Server{
-		Addr:    ":" + port,
+		Addr:    host + ":" + port,
 		Handler: appRouter,
 	}
 
