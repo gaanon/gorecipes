@@ -11,7 +11,7 @@
 	let deleteError: string | null = null; // Specific error for delete operation
 	let isDeleting = false;
 
-	const baseImageUrl = 'http://localhost:8080/uploads/images/';
+	const baseImageUrl = '/uploads/images/';
 	$: imageUrl = recipe?.photo_filename ? `${baseImageUrl}${recipe.photo_filename}` : '';
 
 	async function handleDelete() {
@@ -26,7 +26,7 @@
 		deleteError = null;
 
 		try {
-			const response = await fetch(`http://localhost:8080/api/v1/recipes/${recipe.id}`, {
+			const response = await fetch(`/api/v1/recipes/${recipe.id}`, {
 				method: 'DELETE',
 			});
 

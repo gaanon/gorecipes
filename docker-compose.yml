@@ -29,6 +29,8 @@ services:
       - "5173:80" # Map host port 5173 to Nginx container port 80
     depends_on:
       - backend
+    volumes:
+      - gorecipes_uploads:/var/www/uploads # Mount uploads for Nginx to serve
     restart: unless-stopped
     networks:
       - gorecipes-net

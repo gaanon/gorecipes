@@ -16,7 +16,7 @@ if (tags) {
 queryParams.append('page', page.toString());
 queryParams.append('limit', limit.toString());
 
-const apiUrl = `http://localhost:8080/api/v1/recipes?${queryParams.toString()}`;
+const apiUrl = `/api/v1/recipes?${queryParams.toString()}`;
 
 try {
 	const response = await fetch(apiUrl);

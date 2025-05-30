@@ -6,7 +6,7 @@ export const load = async (event: LoadEvent) => {
 	const id = params.id; // Get the 'id' from the route parameters
 
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/recipes/${id}`);
+		const response = await fetch(`/api/v1/recipes/${id}`);
 
 		if (!response.ok) {
 			const errorText = await response.text();

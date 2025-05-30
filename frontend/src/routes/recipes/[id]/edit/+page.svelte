@@ -40,7 +40,7 @@
 		// If a new photo IS selected, the backend handles replacing it.
 
 		try {
-			const response = await fetch(`http://localhost:8080/api/v1/recipes/${recipeId}`, {
+			const response = await fetch(`/api/v1/recipes/${recipeId}`, {
 				method: 'PUT', // Or 'POST' if your backend expects _method for PUT with FormData
 				body: formData,
 			});
