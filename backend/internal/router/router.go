@@ -17,7 +17,7 @@ func SetupRouter() *gin.Engine {
 	// and common production/preview ports.
 	// Adjust origins as needed for your deployment.
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"}, // Add other origins if needed
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173", "http://192.168.1.45:5173"}, // Add other origins if needed
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
