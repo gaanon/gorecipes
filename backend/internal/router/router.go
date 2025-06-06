@@ -50,12 +50,11 @@ func SetupRouter() *gin.Engine {
 			ingredients.GET("", handlers.GetIngredientsAutocomplete) // e.g., /api/v1/ingredients?q=tomato
 		}
 
-		// Admin routes
+		// Admin routes (currently no admin-specific routes defined)
 		admin := apiV1.Group("/admin")
 		{
-			admin.POST("/migrate-ingredients", handlers.MigrateRecipeIngredients)
-			admin.POST("/export", handlers.ExportData)    // New route for data export
-			admin.POST("/import", handlers.ImportRecipes) // New route for data import
+			admin.POST("/export", handlers.ExportData) // POST /api/v1/admin/export
+			admin.POST("/import", handlers.ImportData) // POST /api/v1/admin/import
 		}
 
 		// Meal Planner routes

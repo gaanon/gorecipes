@@ -86,49 +86,45 @@ func ImportRecipes(c *gin.Context) {
 		}
 		// Ingredients can be an empty slice, so no check needed unless specific validation is added.
 
-		// Check for Duplicates
-		exists, err := database.RecipeExists(recipeFromFile.ID)
+		// Check for Duplicates using PostgreSQL version
+		exists, err := database.RecipeExistsByID(recipeFromFile.ID)
 		if err != nil {
-			log.Printf("[ImportRecipes] Error checking recipe existence for ID %s: %v. Skipping.", recipeFromFile.ID, err)
+			log.Printf("[ImportRecipes] Error checking recipe existence for ID %s with PostgreSQL: %v. Skipping.", recipeFromFile.ID, err)
 			response.SkippedMalformedCount++ // Treat DB error during check as a reason to skip
 			continue
 		}
 		if exists {
-			log.Printf("[ImportRecipes] Skipped duplicate: Recipe ID %s already exists.", recipeFromFile.ID)
+			log.Printf("[ImportRecipes] Skipped duplicate: Recipe ID %s already exists (checked with PostgreSQL).", recipeFromFile.ID)
 			response.SkippedDuplicateCount++
 			continue
 		}
 
-		// Prepare for Save
+		// Prepare for Save - FilterableIngredientNames is deprecated and handled by CreateRecipe
 		recipeToSave := models.Recipe{
-			ID:                        recipeFromFile.ID,
-			Name:                      recipeFromFile.Name,
-			Ingredients:               recipeFromFile.Ingredients, // Assumed to be valid string slice
-			FilterableIngredientNames: recipeFromFile.FilterableIngredientNames,
-			Method:                    recipeFromFile.Method,
-			PhotoFilename:             "", // Ignored as per plan
-			CreatedAt:                 recipeFromFile.CreatedAt,
-			UpdatedAt:                 recipeFromFile.UpdatedAt,
+			ID:            recipeFromFile.ID,
+			Name:          recipeFromFile.Name,
+			Ingredients:   recipeFromFile.Ingredients, // CreateRecipe will process these
+			Method:        recipeFromFile.Method,
+			PhotoFilename: "", // Ignored as per plan, CreateRecipe will handle default if necessary
+			CreatedAt:     recipeFromFile.CreatedAt, // Preserve timestamps from import
+			UpdatedAt:     recipeFromFile.UpdatedAt, // Preserve timestamps from import
 		}
-		if recipeToSave.FilterableIngredientNames == nil { // Ensure it's an empty slice, not nil
-			recipeToSave.FilterableIngredientNames = []string{}
-		}
-		// If recipeFromFile.Ingredients is nil, ensure it's an empty slice
+		// If recipeFromFile.Ingredients is nil, ensure it's an empty slice for CreateRecipe
 		if recipeToSave.Ingredients == nil {
 			recipeToSave.Ingredients = []string{}
 		}
 
-		// Save to Database
-		// Assuming database.SaveRecipe handles creation.
-		// If it needs specific create vs update logic, this might need adjustment
-		// or a new database.CreateRecipeFromImport function.
-		if err := database.SaveRecipe(&recipeToSave); err != nil {
-			log.Printf("[ImportRecipes] Error saving recipe ID %s: %v. Skipping.", recipeToSave.ID, err)
+		// Save to Database using PostgreSQL CreateRecipe
+		// CreateRecipe handles ingredient processing and linking.
+		// It also sets CreatedAt/UpdatedAt if they are zero, but here we provide them.
+		createdRecipe, err := database.CreateRecipe(&recipeToSave) 
+		if err != nil {
+			log.Printf("[ImportRecipes] Error saving recipe ID %s with PostgreSQL CreateRecipe: %v. Skipping.", recipeToSave.ID, err)
 			response.SkippedMalformedCount++
 			continue
 		}
 		response.SuccessfullyImportedCount++
-		log.Printf("[ImportRecipes] Successfully imported recipe ID %s, Name: %s", recipeToSave.ID, recipeToSave.Name)
+		log.Printf("[ImportRecipes] Successfully imported recipe ID %s, Name: %s using PostgreSQL", createdRecipe.ID, createdRecipe.Name)
 	}
 
 	log.Printf("[ImportRecipes] Import process complete. Results: %+v", response)

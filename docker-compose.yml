@@ -3,19 +3,22 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: gaanon/gorecipes-backend:local # Using a local tag to avoid conflict with CI pushes
+    image: gaanon/gorecipes-backend:local
     container_name: gorecipes-backend-dev
     ports:
-      - "8080:8080" # Expose backend port
+      - "8080:8080"
     environment:
-      - PEXELS_API_KEY=${PEXELS_API_KEY} # Define Pexels API Key from .env file or shell
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - DATABASE_URL=postgres://gorecipes_user:gorecipes_pass@postgres-db:5432/gorecipes_db?sslmode=disable
+      - GORECIPES_ENABLE_SEED_DATA=true
     volumes:
-      - gorecipes_badger_data:/app/data/badgerdb # Corrected path for BadgerDB data
       - gorecipes_uploads:/app/uploads/images # Named volume for uploaded images
       # For local development, you might want to mount your source code
       # to see changes without rebuilding the image (if your Go setup supports hot reload or you restart manually)
       # - ./backend:/app # Be cautious with this in Go as it's a compiled language
     restart: unless-stopped
+    depends_on:
+      - postgres-db
     networks:
       - gorecipes-net
 
@@ -23,22 +26,37 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: gaanon/gorecipes-frontend:local # Using a local tag
+    image: gaanon/gorecipes-frontend:local
     container_name: gorecipes-frontend-dev
     ports:
-      - "5173:80" # Map host port 5173 to Nginx container port 80
+      - "5173:80"
     depends_on:
       - backend
     volumes:
-      - gorecipes_uploads:/var/www/uploads # Mount uploads for Nginx to serve
+      - gorecipes_uploads:/var/www/uploads
+    restart: unless-stopped
+    networks:
+      - gorecipes-net
+
+  postgres-db:
+    image: postgres:15
+    container_name: gorecipes-postgres-db-dev
+    environment:
+      POSTGRES_DB: gorecipes_db
+      POSTGRES_USER: gorecipes_user
+      POSTGRES_PASSWORD: gorecipes_pass
+    volumes:
+      - gorecipes_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432" # Host port 5433 to container port 5432
     restart: unless-stopped
     networks:
       - gorecipes-net
 
 volumes:
-  gorecipes_badger_data: # Defines the named volume for BadgerDB
+  gorecipes_uploads:
     driver: local
-  gorecipes_uploads:     # Defines the named volume for uploads
+  gorecipes_postgres_data:
     driver: local
 
 networks:

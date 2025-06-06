@@ -9,5 +9,6 @@ type MealPlanEntry struct {
 	Date      time.Time `json:"date"`       // The specific date (YYYY-MM-DD), time part normalized to UTC midnight
 	RecipeID  string    `json:"recipe_id"`  // ID of the planned recipe
 	CreatedAt time.Time `json:"created_at"` // Timestamp of when the entry was created
+	Notes     string    `json:"notes,omitempty"` // Optional notes for the entry
 	// UserID    string    `json:"user_id"`    // Future: For multi-user support
 }

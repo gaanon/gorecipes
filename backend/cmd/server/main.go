@@ -3,11 +3,11 @@ package main
 import (
 	"context" // Import context
 	"log"
-	"net/http" // Import net/http
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time" // Import time
+	"time"
 
 	"gorecipes/backend/internal/database"
 	"gorecipes/backend/internal/router"
@@ -16,16 +16,27 @@ import (
 func main() {
 	log.Println("Starting Go Recipes API...") // Changed from fmt.Println for consistency
 
-	// Define database path
-	// When running in Docker, this path should match the volume mount point.
-	// The Dockerfile sets WORKDIR /app
-	// The docker-compose.yml mounts the volume to /app/data/badgerdb
-	dbPath := "/app/data/badgerdb"
+	// Database Configuration
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Println("WARNING: DATABASE_URL environment variable not set. Using default development URL.")
+		// This is an example default for local development. 
+		// Ensure your PostgreSQL server is running and accessible with these credentials.
+		dbURL = "postgres://postgres:password@localhost:5432/gorecipes_dev?sslmode=disable"
+		log.Printf("Using default DATABASE_URL: %s (Ensure this is correctly configured for your environment)", dbURL)
+	}
 
 	// Initialize Database
-	if err := database.InitDB(dbPath); err != nil {
+	if err := database.InitPostgreSQLDB(dbURL); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// Seed the database with sample data
+	if err := database.SeedData(database.DB); err != nil {
+		log.Printf("Warning: Failed to seed database: %v. Continuing without seeded data.", err)
+		// Depending on requirements, you might want to log.Fatalf here if seeding is critical
+	}
+
 	// defer database.CloseDB() // Will call this explicitly on shutdown
 
 	// Initialize Gin router using the setup function
@@ -69,5 +80,5 @@ func main() {
 	}
 
 	log.Println("Server exiting")
-	database.CloseDB() // Close DB after server has shut down
+	database.ClosePostgreSQLDB() // Close DB after server has shut down
 }

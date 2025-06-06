@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 const dateLayout = "2006-01-02" // For parsing YYYY-MM-DD
@@ -32,37 +31,36 @@ func CreateMealPlanEntryHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Please use YYYY-MM-DD."})
 		return
 	}
-	// Normalize date to UTC midnight
-	normalizedDate := time.Date(parsedDate.Year(), parsedDate.Month(), parsedDate.Day(), 0, 0, 0, 0, time.UTC)
 
-	// Optional: Validate if RecipeID exists
-	recipeExists, err := database.RecipeExists(req.RecipeID)
+	// Check if recipe exists using PostgreSQL version
+	recipeExists, err := database.RecipeExistsByID(req.RecipeID)
 	if err != nil {
-		log.Printf("[MealPlanner] Create: Error checking recipe existence for ID %s: %v", req.RecipeID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error validating recipe ID"})
+		log.Printf("[MealPlanner] Create: Error checking recipe existence for ID %s using PostgreSQL: %v", req.RecipeID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check recipe existence."})
 		return
 	}
 	if !recipeExists {
-		log.Printf("[MealPlanner] Create: Recipe with ID %s not found.", req.RecipeID)
+		log.Printf("[MealPlanner] Create: Recipe with ID %s not found (checked with PostgreSQL).", req.RecipeID)
 		c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found."})
 		return
 	}
 
-	entry := models.MealPlanEntry{
-		ID:        uuid.New().String(),
-		Date:      normalizedDate,
-		RecipeID:  req.RecipeID,
-		CreatedAt: time.Now().UTC(),
+	// Prepare the entry. ID and CreatedAt will be set by the database.CreateMealPlanEntry function.
+	// The Date field in entry will also be normalized to UTC midnight by CreateMealPlanEntry.
+	entryData := models.MealPlanEntry{
+		Date:     parsedDate, // Pass the parsed date; normalization happens in DB func
+		RecipeID: req.RecipeID,
 	}
 
-	if err := database.SaveMealPlanEntry(&entry); err != nil {
-		log.Printf("[MealPlanner] Create: Error saving meal plan entry: %v", err)
+	createdEntry, err := database.CreateMealPlanEntry(&entryData)
+	if err != nil {
+		log.Printf("[MealPlanner] Create: Error saving meal plan entry with PostgreSQL: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save meal plan entry."})
 		return
 	}
 
-	log.Printf("[MealPlanner] Create: Successfully created meal plan entry ID %s for Recipe %s on %s", entry.ID, entry.RecipeID, entry.Date.Format(dateLayout))
-	c.JSON(http.StatusCreated, entry)
+	log.Printf("[MealPlanner] Create: Successfully created meal plan entry ID %s for Recipe %s on %s using PostgreSQL", createdEntry.ID, createdEntry.RecipeID, createdEntry.Date.Format(dateLayout))
+	c.JSON(http.StatusCreated, createdEntry)
 }
 
 // ListMealPlanEntriesHandler handles GET /api/v1/mealplanner/entries

@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"archive/zip" // Added for image ZIP export
-	"bytes"
 	"encoding/json"
 	"fmt" // Added for Pexels integration
 	"gorecipes/backend/internal/database"
@@ -16,12 +14,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"  // Added for ingredient parsing
-	"sort"    // Added for sorting recipes
 	"strconv" // Added for pagination
 	"strings"
 	"time"
 
-	"github.com/dgraph-io/badger/v4"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -319,6 +315,8 @@ func extractFilterableNames(fullIngredient string) []string {
 // POST /api/v1/recipes - expects multipart/form-data
 func CreateRecipe(c *gin.Context) {
 	var recipe models.Recipe
+	// Generate ID in handler for use in photo filename generation before DB call.
+	// database.CreateRecipe will use this ID if provided.
 	recipe.ID = uuid.New().String()
 
 	recipe.Name = c.PostForm("name")
@@ -334,34 +332,31 @@ func CreateRecipe(c *gin.Context) {
 		return
 	}
 
-	// Initialize Ingredients and FilterableIngredientNames
+	// Process ingredients from comma-separated string to []string
 	recipe.Ingredients = []string{}
-	recipe.FilterableIngredientNames = []string{}
-
-	uniqueFilterableNames := make(map[string]bool)
-
 	if ingredientsStr != "" {
 		rawIngredients := strings.Split(ingredientsStr, ",")
 		for _, ing := range rawIngredients {
 			trimmedIng := strings.TrimSpace(ing)
 			if trimmedIng != "" {
 				recipe.Ingredients = append(recipe.Ingredients, trimmedIng)
-				// Extract and add filterable names
-				filterable := extractFilterableNames(trimmedIng)
-				for _, fname := range filterable {
-					if fname != "" && !uniqueFilterableNames[fname] {
-						recipe.FilterableIngredientNames = append(recipe.FilterableIngredientNames, fname)
-						uniqueFilterableNames[fname] = true
-					}
-				}
 			}
 		}
 	}
-	// No need to check for nil recipe.Ingredients as it's initialized
 
+	// Handle photo upload / Pexels integration
 	file, errFile := c.FormFile("photo")
 	if errFile == nil {
+		// User uploaded a photo
 		photoFilename := recipe.ID + filepath.Ext(file.Filename)
+		// Ensure uploadsDir exists
+		if _, err := os.Stat(uploadsDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(uploadsDir, os.ModePerm); err != nil {
+				log.Printf("Error creating uploads directory %s: %v", uploadsDir, err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create uploads directory"})
+				return
+			}
+		}
 		dst := filepath.Join(uploadsDir, photoFilename)
 		if err := saveUploadedFile(file, dst); err != nil {
 			log.Printf("Error saving uploaded file for new recipe %s: %v", recipe.ID, err)
@@ -371,11 +366,11 @@ func CreateRecipe(c *gin.Context) {
 		recipe.PhotoFilename = photoFilename
 		log.Printf("Photo saved for new recipe %s: %s", recipe.ID, photoFilename)
 	} else if errFile != http.ErrMissingFile {
+		// Some other error with file upload
 		log.Printf("Error retrieving photo from form for new recipe %s: %v", recipe.ID, errFile)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Error processing photo upload"})
 		return
-	} else if errFile == http.ErrMissingFile {
-		// No file uploaded by user, try to fetch from Pexels
+	} else { // http.ErrMissingFile: No file uploaded by user, try Pexels or placeholder
 		pexelsAPIKey := os.Getenv("PEXELS_API_KEY")
 		if pexelsAPIKey != "" && recipe.Name != "" {
 			log.Printf("No photo uploaded for recipe %s. Attempting to fetch from Pexels...", recipe.ID)
@@ -385,54 +380,35 @@ func CreateRecipe(c *gin.Context) {
 				log.Printf("Successfully used Pexels image %s for recipe %s", fetchedFilename, recipe.ID)
 			} else {
 				log.Printf("Failed to fetch image from Pexels for recipe %s (query: %s): %v. Using placeholder.", recipe.ID, recipe.Name, errPexels)
-				recipe.PhotoFilename = placeholderImage
+				recipe.PhotoFilename = placeholderImage // Ensure placeholder is set if Pexels fails
 			}
 		} else {
 			if pexelsAPIKey == "" {
 				log.Printf("Pexels API key not configured. Using placeholder image for recipe %s.", recipe.ID)
-			} else {
+			} else { // recipe.Name is empty
 				log.Printf("Recipe name is empty, cannot fetch from Pexels. Using placeholder for recipe %s.", recipe.ID)
 			}
 			recipe.PhotoFilename = placeholderImage
 		}
 	}
 
-	now := time.Now().UTC()
-	recipe.CreatedAt = now
-	recipe.UpdatedAt = now
-
-	recipeJSON, errMarshal := json.Marshal(recipe)
-	if errMarshal != nil {
-		log.Printf("Error marshalling recipe %s to JSON: %v", recipe.ID, errMarshal)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process recipe data"})
-		return
+	// If PhotoFilename is still empty after all attempts (e.g. Pexels disabled and no upload), set placeholder as a safeguard.
+	if recipe.PhotoFilename == "" {
+		recipe.PhotoFilename = placeholderImage
 	}
 
-	errDb := database.DB.Update(func(txn *badger.Txn) error {
-		recipeKey := []byte("recipe:" + recipe.ID)
-		if err := txn.Set(recipeKey, recipeJSON); err != nil {
-			return err
-		}
-		for _, ingredientName := range recipe.Ingredients {
-			if strings.TrimSpace(ingredientName) == "" {
-				continue
-			}
-			ingredientKey := []byte("ingredient:" + strings.ToLower(strings.TrimSpace(ingredientName)))
-			if err := txn.Set(ingredientKey, []byte("1")); err != nil {
-				log.Printf("Error saving ingredient key %s for recipe %s: %v", ingredientKey, recipe.ID, err)
-			}
-		}
-		return nil
-	})
+	// Timestamps (CreatedAt, UpdatedAt) will be set by the database.CreateRecipe function.
 
+	// Save recipe to PostgreSQL database
+	createdRecipe, errDb := database.CreateRecipe(&recipe)
 	if errDb != nil {
-		log.Printf("Error saving recipe %s to database: %v", recipe.ID, errDb)
+		log.Printf("Error saving recipe to database (ID attempted: %s): %v", recipe.ID, errDb)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save recipe"})
 		return
 	}
 
-	log.Printf("Recipe created successfully: %s", recipe.ID)
-	c.JSON(http.StatusCreated, recipe)
+	log.Printf("Recipe created successfully: ID=%s, Name=%s", createdRecipe.ID, createdRecipe.Name)
+	c.JSON(http.StatusCreated, createdRecipe)
 }
 
 // PaginatedRecipesResponse defines the structure for paginated recipe results.
@@ -445,7 +421,7 @@ type PaginatedRecipesResponse struct {
 }
 
 // ListRecipes handles listing recipes with pagination and filtering.
-// GET /api/v1/recipes
+// GET /api/v1/recipes?page=1&limit=25&tags=chicken,rice&search=curry
 func ListRecipes(c *gin.Context) {
 	// Parse query parameters for pagination
 	pageStr := c.DefaultQuery("page", "1")
@@ -460,119 +436,44 @@ func ListRecipes(c *gin.Context) {
 	if errLimit != nil || limit <= 0 {
 		limit = defaultPageLimit
 	}
-	// Optional: Add a max limit if desired
-	// if limit > 100 { limit = 100 }
+	// Optional: Add a max limit if desired, e.g., if limit > 100 { limit = 100 }
 
-	var filteredRecipes []models.Recipe // Stores recipes after tag filtering, before pagination
+	// Parse query parameters for filtering and searching
+	searchTerm := strings.TrimSpace(c.Query("search"))
 	tagsQuery := c.Query("tags")
-	var filterTags []string
+	var ingredientFilters []string
 	if tagsQuery != "" {
 		rawTags := strings.Split(tagsQuery, ",")
 		for _, t := range rawTags {
 			trimmedTag := strings.ToLower(strings.TrimSpace(t))
 			if trimmedTag != "" {
-				filterTags = append(filterTags, trimmedTag)
+				ingredientFilters = append(ingredientFilters, trimmedTag)
 			}
 		}
 	}
-	log.Printf("[ListRecipes] Received tagsQuery: '%s', Parsed filterTags: %v", tagsQuery, filterTags) // DEBUG LOGGING
 
-	err := database.DB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchSize = 10 // PrefetchSize can be tuned
-		it := txn.NewIterator(opts)
-		defer it.Close()
+	log.Printf("[ListRecipes] Query Params: page=%d, limit=%d, search='%s', tags=%v", page, limit, searchTerm, ingredientFilters)
 
-		prefix := []byte("recipe:")
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			var recipe models.Recipe
-			errValue := item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &recipe)
-			})
-			if errValue != nil {
-				log.Printf("Error unmarshalling recipe %s: %v", item.Key(), errValue)
-				// Potentially skip this recipe or return error
-				return errValue // This will stop the iteration
-			}
-
-			if len(filterTags) > 0 {
-				// Log details of the recipe being checked
-				log.Printf("[ListRecipes] Checking Recipe - ID: %s, Name: '%s', FilterableIngredientNames: %v. Against filterTags: %v", recipe.ID, recipe.Name, recipe.FilterableIngredientNames, filterTags)
-				if containsAnyTag(recipe.ID, recipe.FilterableIngredientNames, filterTags) {
-					log.Printf("[ListRecipes] Match FOUND for Recipe ID: %s, Name: '%s'. Adding to results.", recipe.ID, recipe.Name)
-					filteredRecipes = append(filteredRecipes, recipe)
-				} else {
-					log.Printf("[ListRecipes] No match for Recipe ID: %s, Name: '%s'.", recipe.ID, recipe.Name)
-				}
-			} else {
-				filteredRecipes = append(filteredRecipes, recipe) // Add if no filters are active
-			}
-		}
-		return nil
-	})
-
+	// Fetch recipes from PostgreSQL database
+	recipes, totalCount, err := database.GetAllRecipes(searchTerm, ingredientFilters, page, limit)
 	if err != nil {
 		log.Printf("Error retrieving recipes from database: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve recipes"})
 		return
 	}
 
-	// Sort recipes alphabetically by name before pagination
-	sort.Slice(filteredRecipes, func(i, j int) bool {
-		return strings.ToLower(filteredRecipes[i].Name) < strings.ToLower(filteredRecipes[j].Name)
-	})
-
-	// Perform in-memory pagination on the filteredRecipes
-	totalFilteredRecipes := len(filteredRecipes)
-	if totalFilteredRecipes == 0 {
-		c.JSON(http.StatusOK, PaginatedRecipesResponse{
-			Recipes:      []models.Recipe{},
-			TotalRecipes: 0,
-			Page:         page,
-			Limit:        limit,
-			TotalPages:   0,
-		})
-		return
+	if recipes == nil {
+		recipes = []models.Recipe{} // Ensure we return an empty array, not null
 	}
 
-	totalPages := int(math.Ceil(float64(totalFilteredRecipes) / float64(limit)))
-	if page > totalPages {
-		// If requested page is out of bounds after filtering,
-		// it's debatable whether to return an error or an empty list for that page.
-		// For "load more" style, returning empty might be fine.
-		// For strict pagination, an error or last page might be better.
-		// Let's return empty for now.
-		page = totalPages // Or handle as an error, e.g. c.JSON(http.StatusNotFound, ...)
-	}
-
-	startIndex := (page - 1) * limit
-	endIndex := startIndex + limit
-
-	if startIndex >= totalFilteredRecipes {
-		// This case means the requested page is beyond the available data
-		c.JSON(http.StatusOK, PaginatedRecipesResponse{
-			Recipes:      []models.Recipe{}, // Empty slice for this page
-			TotalRecipes: totalFilteredRecipes,
-			Page:         page,
-			Limit:        limit,
-			TotalPages:   totalPages,
-		})
-		return
-	}
-
-	if endIndex > totalFilteredRecipes {
-		endIndex = totalFilteredRecipes
-	}
-
-	paginatedSlice := filteredRecipes[startIndex:endIndex]
-	if paginatedSlice == nil { // Ensure it's an empty slice not nil
-		paginatedSlice = []models.Recipe{}
+	totalPages := 0
+	if totalCount > 0 && limit > 0 {
+		totalPages = int(math.Ceil(float64(totalCount) / float64(limit)))
 	}
 
 	response := PaginatedRecipesResponse{
-		Recipes:      paginatedSlice,
-		TotalRecipes: totalFilteredRecipes,
+		Recipes:      recipes,
+		TotalRecipes: totalCount,
 		Page:         page,
 		Limit:        limit,
 		TotalPages:   totalPages,
@@ -614,29 +515,30 @@ func containsAnyTag(recipeID string, recipeIngredients []string, filterTags []st
 // GET /api/v1/recipes/:id
 func GetRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
-	var recipe models.Recipe
 
-	err := database.DB.View(func(txn *badger.Txn) error {
-		key := []byte("recipe:" + recipeID)
-		item, errGet := txn.Get(key)
-		if errGet != nil {
-			return errGet
-		}
-		return item.Value(func(val []byte) error {
-			return json.Unmarshal(val, &recipe)
-		})
-	})
-
-	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			log.Printf("Recipe with ID %s not found: %v", recipeID, err)
-			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found"})
-			return
-		}
-		log.Printf("Error retrieving recipe %s from database: %v", recipeID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve recipe"})
+	if recipeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Recipe ID cannot be empty"})
 		return
 	}
+
+	recipe, err := database.GetRecipeByID(recipeID)
+	if err != nil {
+		// Check if the error is due to the recipe not being found.
+		// database.GetRecipeByID is expected to return an error that can be identified as 'not found'.
+		// For example, if it wraps sql.ErrNoRows, we could check for that.
+		// Assuming database.GetRecipeByID returns a specific error type or message for not found.
+		// For now, let's assume a generic error check and log it.
+		// A more robust way would be to define a custom error in the database package, e.g., database.ErrNotFound.
+		if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(err.Error(), "no rows in result set") {
+			log.Printf("Recipe with ID %s not found: %v", recipeID, err)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found"})
+		} else {
+			log.Printf("Error retrieving recipe %s from database: %v", recipeID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve recipe"})
+		}
+		return
+	}
+
 	c.JSON(http.StatusOK, recipe)
 }
 
@@ -644,20 +546,42 @@ func GetRecipe(c *gin.Context) {
 // PUT /api/v1/recipes/:id - expects multipart/form-data
 func UpdateRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
+	if recipeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Recipe ID cannot be empty"})
+		return
+	}
 
-	name := c.PostForm("name")
-	method := c.PostForm("method")
+	// Fetch existing recipe to get current photo filename and other details
+	existingRecipe, err := database.GetRecipeByID(recipeID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(err.Error(), "no rows in result set") {
+			log.Printf("Recipe with ID %s not found for update: %v", recipeID, err)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found"})
+		} else {
+			log.Printf("Error retrieving recipe %s for update: %v", recipeID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve recipe for update"})
+		}
+		return
+	}
+
+	// Create a recipe model to hold updated values
+	recipeToUpdate := *existingRecipe // Start with existing values
+
+	// Update fields from form data
+	recipeToUpdate.Name = c.PostForm("name")
+	recipeToUpdate.Method = c.PostForm("method")
 	ingredientsStr := c.PostForm("ingredients")
 
-	if strings.TrimSpace(name) == "" {
+	if strings.TrimSpace(recipeToUpdate.Name) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Recipe name cannot be empty"})
 		return
 	}
-	if strings.TrimSpace(method) == "" {
+	if strings.TrimSpace(recipeToUpdate.Method) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Recipe method cannot be empty"})
 		return
 	}
 
+	// Process ingredients
 	var updatedIngredients []string
 	if ingredientsStr != "" {
 		rawIngredients := strings.Split(ingredientsStr, ",")
@@ -668,159 +592,129 @@ func UpdateRecipe(c *gin.Context) {
 			}
 		}
 	}
-	if updatedIngredients == nil {
-		updatedIngredients = []string{}
+	recipeToUpdate.Ingredients = updatedIngredients // Can be empty if ingredientsStr was empty or all spaces
+
+	// Handle photo update
+	oldPhotoFilename := existingRecipe.PhotoFilename
+	newPhotoUploaded := false
+
+	file, errUpload := c.FormFile("photo")
+	if errUpload == nil {
+		// New photo uploaded
+		newPhotoFilename := recipeID + "_updated_" + uuid.New().String() + filepath.Ext(file.Filename)
+		// Ensure uploadsDir exists
+		if _, errStat := os.Stat(uploadsDir); os.IsNotExist(errStat) {
+			if errMkdir := os.MkdirAll(uploadsDir, os.ModePerm); errMkdir != nil {
+				log.Printf("Error creating uploads directory %s during update: %v", uploadsDir, errMkdir)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create uploads directory"})
+				return
+			}
+		}
+		dst := filepath.Join(uploadsDir, newPhotoFilename)
+		if errSave := saveUploadedFile(file, dst); errSave != nil {
+			log.Printf("Error saving updated photo file for recipe %s: %v", recipeID, errSave)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save updated photo"})
+			return // Or decide to proceed without photo update
+		} else {
+			recipeToUpdate.PhotoFilename = newPhotoFilename
+			newPhotoUploaded = true
+			log.Printf("New photo saved for recipe %s: %s", recipeID, newPhotoFilename)
+		}
+	} else if errUpload != http.ErrMissingFile {
+		// Error other than 'no file'
+		log.Printf("Error retrieving photo from form during update for recipe %s: %v", recipeID, errUpload)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Error processing photo upload for update"})
+		return
+	}
+	// If no new photo was uploaded (errUpload == http.ErrMissingFile), recipeToUpdate.PhotoFilename remains existingRecipe.PhotoFilename
+
+	// If a new photo was successfully uploaded and there was an old one (not placeholder, not the same as new),
+	// delete the old photo from the filesystem.
+	if newPhotoUploaded && oldPhotoFilename != "" && oldPhotoFilename != placeholderImage && oldPhotoFilename != recipeToUpdate.PhotoFilename {
+		oldPhotoPath := filepath.Join(uploadsDir, oldPhotoFilename)
+		if errRemove := os.Remove(oldPhotoPath); errRemove != nil {
+			log.Printf("Error deleting old photo %s for recipe %s: %v", oldPhotoPath, recipeID, errRemove)
+			// Non-fatal, just log it.
+		} else {
+			log.Printf("Old photo deleted for recipe %s: %s", recipeID, oldPhotoPath)
+		}
 	}
 
-	var existingRecipe models.Recipe
-	var newPhotoFilename string // Stores name if a new photo is uploaded
+	// If after all, PhotoFilename is empty (e.g. was placeholder and no new upload), ensure it's set to placeholder.
+	if recipeToUpdate.PhotoFilename == "" {
+		recipeToUpdate.PhotoFilename = placeholderImage
+	}
 
-	err := database.DB.Update(func(txn *badger.Txn) error {
-		key := []byte("recipe:" + recipeID)
-		item, errGet := txn.Get(key)
-		if errGet != nil {
-			return errGet
-		}
-		errGet = item.Value(func(val []byte) error {
-			return json.Unmarshal(val, &existingRecipe)
-		})
-		if errGet != nil {
-			return errGet
-		}
+	// Timestamps (UpdatedAt) will be handled by database.UpdateRecipe
 
-		oldPhotoFilename := existingRecipe.PhotoFilename
-
-		existingRecipe.Name = name
-		// Process ingredients and filterable names
-		existingRecipe.Ingredients = updatedIngredients // This is already populated from lines 655-667
-		existingRecipe.FilterableIngredientNames = []string{}
-		uniqueFilterableNames := make(map[string]bool)
-		for _, ing := range existingRecipe.Ingredients { // Iterate over the already processed full ingredient strings
-			filterable := extractFilterableNames(ing)
-			for _, fname := range filterable {
-				if fname != "" && !uniqueFilterableNames[fname] {
-					existingRecipe.FilterableIngredientNames = append(existingRecipe.FilterableIngredientNames, fname)
-					uniqueFilterableNames[fname] = true
-				}
-			}
+	updatedRecipe, errDb := database.UpdateRecipe(&recipeToUpdate)
+	if errDb != nil {
+		// database.UpdateRecipe might also return a 'not found' error if the ID doesn't exist at the time of update.
+		if strings.Contains(strings.ToLower(errDb.Error()), "not found") || strings.Contains(errDb.Error(), "no rows in result set") {
+			log.Printf("Recipe with ID %s not found during database update: %v", recipeID, errDb)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found for update"})
+		} else {
+			log.Printf("Error updating recipe %s in database: %v", recipeID, errDb)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update recipe"})
 		}
-
-		existingRecipe.Method = method
-		existingRecipe.UpdatedAt = time.Now().UTC()
-
-		file, errUpload := c.FormFile("photo")
-		if errUpload == nil {
-			newPhotoFilename = recipeID + "_updated_" + uuid.New().String() + filepath.Ext(file.Filename)
-			dst := filepath.Join(uploadsDir, newPhotoFilename)
-			if errSave := saveUploadedFile(file, dst); errSave != nil {
-				log.Printf("Error saving updated photo file for recipe %s: %v", recipeID, errSave)
-				// Decide if this should be a fatal error for the update
-			} else {
-				existingRecipe.PhotoFilename = newPhotoFilename
-				log.Printf("New photo saved for recipe %s: %s", recipeID, newPhotoFilename)
-				if oldPhotoFilename != "" && oldPhotoFilename != newPhotoFilename {
-					oldPhotoPath := filepath.Join(uploadsDir, oldPhotoFilename)
-					if errRemove := os.Remove(oldPhotoPath); errRemove != nil {
-						log.Printf("Error deleting old photo %s for recipe %s: %v", oldPhotoPath, recipeID, errRemove)
-					} else {
-						log.Printf("Old photo deleted for recipe %s: %s", recipeID, oldPhotoPath)
-					}
-				}
-			}
-		} else if errUpload != http.ErrMissingFile {
-			log.Printf("Error retrieving photo from form during update for recipe %s: %v", recipeID, errUpload)
-			// Decide if this should be a fatal error
-		}
-		// If errUpload == http.ErrMissingFile and no new photo was uploaded,
-		// and if existingRecipe.PhotoFilename was empty, set it to placeholder.
-		// If it already had a photo, it will keep it.
-		if errUpload == http.ErrMissingFile && existingRecipe.PhotoFilename == "" {
-			existingRecipe.PhotoFilename = "placeholder.jpg"
-		}
-
-		updatedRecipeJSON, errMarshal := json.Marshal(existingRecipe)
-		if errMarshal != nil {
-			return errMarshal
-		}
-		if errSet := txn.Set(key, updatedRecipeJSON); errSet != nil {
-			return errSet
-		}
-
-		// Update ingredient keys
-		// For simplicity, this adds new ones but doesn't remove old ones if ingredients are removed.
-		// A more robust solution would involve checking which ingredients were removed and potentially decrementing a counter or similar.
-		for _, ingredientName := range existingRecipe.Ingredients {
-			if strings.TrimSpace(ingredientName) == "" {
-				continue
-			}
-			ingredientKey := []byte("ingredient:" + strings.ToLower(strings.TrimSpace(ingredientName)))
-			if errSetIng := txn.Set(ingredientKey, []byte("1")); errSetIng != nil {
-				log.Printf("Error saving ingredient key %s during update for recipe %s: %v", ingredientKey, recipeID, errSetIng)
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			log.Printf("Recipe with ID %s not found for update: %v", recipeID, err)
-			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found"})
-			return
-		}
-		log.Printf("Error updating recipe %s in database: %v", recipeID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update recipe"})
 		return
 	}
 
-	log.Printf("Recipe updated successfully: %s", recipeID)
-	c.JSON(http.StatusOK, existingRecipe)
+	log.Printf("Recipe updated successfully: ID=%s, Name=%s", updatedRecipe.ID, updatedRecipe.Name)
+	c.JSON(http.StatusOK, updatedRecipe)
 }
 
 // DeleteRecipe handles deleting a recipe by ID.
 // DELETE /api/v1/recipes/:id
 func DeleteRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
-	var recipeToDelete models.Recipe // To get photo filename for deletion
-
-	err := database.DB.Update(func(txn *badger.Txn) error {
-		key := []byte("recipe:" + recipeID)
-		item, errGet := txn.Get(key)
-		if errGet != nil {
-			return errGet
-		}
-		// Get recipe data to find photo filename before deleting
-		errGet = item.Value(func(val []byte) error {
-			return json.Unmarshal(val, &recipeToDelete)
-		})
-		if errGet != nil {
-			// Log but proceed with deletion of recipe key if unmarshal fails
-			log.Printf("Error unmarshalling recipe %s before deletion (photo might not be deleted): %v", recipeID, errGet)
-		}
-
-		return txn.Delete(key)
-	})
-
-	if err != nil {
-		if err == badger.ErrKeyNotFound {
-			log.Printf("Recipe with ID %s not found for deletion: %v", recipeID, err)
-			c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found"})
-			return
-		}
-		log.Printf("Error deleting recipe %s from database: %v", recipeID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete recipe"})
+	if recipeID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Recipe ID cannot be empty"})
 		return
 	}
 
-	// If recipe was deleted and had a photo, delete the photo file
-	if recipeToDelete.PhotoFilename != "" {
-		photoPath := filepath.Join(uploadsDir, recipeToDelete.PhotoFilename)
-		if errRemove := os.Remove(photoPath); errRemove != nil {
-			log.Printf("Error deleting photo file %s for deleted recipe %s: %v", photoPath, recipeID, errRemove)
+	// Step 1: Fetch the recipe to get its photo filename before deleting from DB.
+	recipeToDelete, err := database.GetRecipeByID(recipeID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(err.Error(), "no rows in result set") {
+			log.Printf("Recipe with ID %s not found (already deleted or never existed): %v", recipeID, err)
+			c.Status(http.StatusNoContent) // Recipe is gone, so operation is effectively successful.
 		} else {
-			log.Printf("Photo file deleted for recipe %s: %s", recipeID, photoPath)
+			log.Printf("Error retrieving recipe %s for deletion: %v", recipeID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve recipe before deletion"})
+		}
+		return
+	}
+
+	// Step 2: Delete the recipe from the database.
+	errDbDelete := database.DeleteRecipe(recipeID)
+	if errDbDelete != nil {
+		// If GetRecipeByID succeeded, a "not found" here would be unusual but handle defensively.
+		if strings.Contains(strings.ToLower(errDbDelete.Error()), "not found") || strings.Contains(errDbDelete.Error(), "no rows in result set") {
+			log.Printf("Recipe with ID %s was not found during DB deletion (possibly deleted concurrently): %v", recipeID, errDbDelete)
+			// Proceed to photo deletion if recipeToDelete has photo info, then return 204.
+		} else {
+			log.Printf("Error deleting recipe %s from database: %v", recipeID, errDbDelete)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete recipe from database"})
+			return
 		}
 	}
-	// TODO: Consider logic for removing ingredient keys if they are no longer used by any recipe.
+
+	// Step 3: If recipe was fetched and had a photo (and it's not the placeholder), delete the photo file.
+	if recipeToDelete != nil && recipeToDelete.PhotoFilename != "" && recipeToDelete.PhotoFilename != placeholderImage {
+		photoPath := filepath.Join(uploadsDir, recipeToDelete.PhotoFilename)
+		// Ensure uploadsDir exists before trying to remove a file from it (though unlikely to be an issue here)
+		if _, errStat := os.Stat(uploadsDir); os.IsNotExist(errStat) {
+			log.Printf("Uploads directory %s does not exist, cannot delete photo %s", uploadsDir, photoPath)
+		} else {
+			if errRemove := os.Remove(photoPath); errRemove != nil {
+				// Log error but don't fail the overall operation if DB deletion was successful.
+				log.Printf("Error deleting photo file %s for deleted recipe %s: %v", photoPath, recipeID, errRemove)
+			} else {
+				log.Printf("Photo file deleted for recipe %s: %s", recipeID, photoPath)
+			}
+		}
+	}
 
 	log.Printf("Recipe deleted successfully: %s", recipeID)
 	c.Status(http.StatusNoContent)
@@ -837,30 +731,11 @@ func GetIngredientsAutocomplete(c *gin.Context) {
 		return
 	}
 
-	err := database.DB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		prefix := []byte("ingredient:")
-		// searchPrefix := append(prefix, []byte(query)...) // This was too specific
-
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			key := item.Key()
-			ingredientNameBytes := bytes.TrimPrefix(key, prefix)
-			ingredientName := string(ingredientNameBytes)
-
-			if strings.HasPrefix(strings.ToLower(ingredientName), query) {
-				matchingIngredients = append(matchingIngredients, ingredientName)
-			}
-			if len(matchingIngredients) >= 10 { // Limit suggestions
-				break
-			}
-		}
-		return nil
-	})
+	// TODO: Implement PostgreSQL specific logic to query the 'ingredients' table
+	// For now, returning empty to avoid build errors.
+	log.Println("[GetIngredientsAutocomplete] BadgerDB logic removed. Needs PostgreSQL implementation.")
+	var err error // Keep err declared for the check below
+	// err = fmt.Errorf("PostgreSQL implementation pending") // Example of setting an error
 
 	if err != nil {
 		log.Printf("Error searching ingredients: %v", err)
@@ -874,316 +749,91 @@ func GetIngredientsAutocomplete(c *gin.Context) {
 	c.JSON(http.StatusOK, matchingIngredients)
 }
 
-// MigrateRecipeIngredients handles a one-time migration to populate
-// the FilterableIngredientNames field for all existing recipes.
-// POST /api/v1/admin/migrate-ingredients (or similar)
-func MigrateRecipeIngredients(c *gin.Context) {
-	log.Println("Starting ingredient migration for existing recipes...")
-	var recipesToUpdate []models.Recipe
-	var keysToUpdate [][]byte // Store keys to update in a separate transaction if needed, or update one by one
 
-	// Phase 1: Read all recipes
-	errView := database.DB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = true // We need the values
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		prefix := []byte("recipe:")
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			var recipe models.Recipe
-			errValue := item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &recipe)
-			})
-			if errValue != nil {
-				log.Printf("Error unmarshalling recipe %s during migration scan: %v", item.Key(), errValue)
-				return errValue // Or continue to next item
-			}
-			recipesToUpdate = append(recipesToUpdate, recipe)
-			keysToUpdate = append(keysToUpdate, item.KeyCopy(nil))
-		}
-		return nil
-	})
-
-	if errView != nil {
-		log.Printf("Error reading recipes during migration: %v", errView)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read recipes for migration", "details": errView.Error()})
-		return
-	}
-
-	log.Printf("Found %d recipes to process for migration.", len(recipesToUpdate))
-	updatedCount := 0
-	errorCount := 0
-
-	// Phase 2: Process and update each recipe
-	for i, recipe := range recipesToUpdate {
-		key := keysToUpdate[i]
-
-		// Re-initialize FilterableIngredientNames for a clean slate during migration
-		recipe.FilterableIngredientNames = []string{}
-		uniqueFilterableNames := make(map[string]bool)
-
-		for _, ingStr := range recipe.Ingredients {
-			filterable := extractFilterableNames(ingStr)
-			for _, fname := range filterable {
-				if fname != "" && !uniqueFilterableNames[fname] {
-					recipe.FilterableIngredientNames = append(recipe.FilterableIngredientNames, fname)
-					uniqueFilterableNames[fname] = true
-				}
-			}
-		}
-		recipe.UpdatedAt = time.Now().UTC() // Update timestamp
-
-		recipeJSON, errMarshal := json.Marshal(recipe)
-		if errMarshal != nil {
-			log.Printf("Error marshalling recipe %s during migration update: %v", recipe.ID, errMarshal)
-			errorCount++
-			continue // Skip this recipe
-		}
-
-		errUpdate := database.DB.Update(func(txn *badger.Txn) error {
-			return txn.Set(key, recipeJSON)
-		})
-
-		if errUpdate != nil {
-			log.Printf("Error updating recipe %s during migration: %v", recipe.ID, errUpdate)
-			errorCount++
-		} else {
-			log.Printf("Successfully migrated ingredients for recipe ID: %s, Name: %s", recipe.ID, recipe.Name)
-			updatedCount++
-		}
-	}
-
-	log.Printf("Ingredient migration finished. Recipes updated: %d, Errors: %d", updatedCount, errorCount)
-	c.JSON(http.StatusOK, gin.H{
-		"message":         "Ingredient migration process completed.",
-		"recipes_found":   len(recipesToUpdate),
-		"recipes_updated": updatedCount,
-		"errors":          errorCount,
-	})
-}
-
-// ExportData handles requests to export recipes and/or images.
+// ExportData handles exporting all recipe and related data.
 // POST /api/v1/admin/export
 func ExportData(c *gin.Context) {
-	log.Println("Starting data export process...")
+	var exportedData models.ExportedData
+	var err error
 
-	var options struct {
-		ExportRecipes bool `json:"export_recipes"`
-		// RecipeFormat  string `json:"recipe_format"` // Removed as we stick to JSON for now
-		ExportImages bool `json:"export_images"`
-	}
-
-	if err := c.ShouldBindJSON(&options); err != nil {
-		log.Printf("Error binding JSON for export options: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid export options provided", "details": err.Error()})
+	exportedData.Recipes, err = database.GetAllRecipesForExport()
+	if err != nil {
+		log.Printf("Error fetching recipes for export: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch recipes for export"})
 		return
 	}
 
-	log.Printf("Export options received: ExportRecipes=%t, ExportImages=%t", options.ExportRecipes, options.ExportImages)
-
-	if !options.ExportRecipes && !options.ExportImages {
-		log.Println("No export type selected (recipes or images).")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select at least one item to export (recipes or images)."})
+	exportedData.Ingredients, err = database.GetAllIngredients()
+	if err != nil {
+		log.Printf("Error fetching ingredients for export: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch ingredients for export"})
 		return
 	}
 
-	// Fetch all recipes once if either recipes or images are needed.
-	var allRecipes []models.Recipe
-	if options.ExportRecipes || options.ExportImages {
-		errView := database.DB.View(func(txn *badger.Txn) error {
-			opts := badger.DefaultIteratorOptions
-			opts.PrefetchValues = true
-			it := txn.NewIterator(opts)
-			defer it.Close()
-			prefix := []byte("recipe:")
-			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-				item := it.Item()
-				var recipe models.Recipe
-				if err := item.Value(func(val []byte) error { return json.Unmarshal(val, &recipe) }); err != nil {
-					log.Printf("Error unmarshalling recipe %s during export scan: %v", item.Key(), err)
-					return err
-				}
-				allRecipes = append(allRecipes, recipe)
-			}
-			return nil
-		})
-		if errView != nil {
-			log.Printf("Error reading recipes for export: %v", errView)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read recipes for export", "details": errView.Error()})
-			return
-		}
-		if len(allRecipes) == 0 {
-			log.Println("No recipes found in the database.")
-			// Let specific handlers decide what to do with empty allRecipes list.
-		}
-	}
-
-	// Case 1: Export both Recipes (JSON) and Images (Combined ZIP)
-	if options.ExportRecipes && options.ExportImages {
-		log.Println("Combined export: Recipes (JSON) and Images.")
-		if len(allRecipes) == 0 {
-			log.Println("No recipes (and thus no recipe data or images) to export for combined ZIP.")
-			c.JSON(http.StatusOK, gin.H{"message": "No recipes found to include in the export."})
-			return
-		}
-
-		buf := new(bytes.Buffer)
-		zipWriter := zip.NewWriter(buf)
-
-		// Add recipes.json to ZIP
-		jsonData, errMarshal := json.MarshalIndent(allRecipes, "", "  ")
-		if errMarshal != nil {
-			log.Printf("Error marshalling recipes to JSON for combined ZIP: %v", errMarshal)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal recipes for ZIP"})
-			return
-		}
-		jsonFileInZip, errZipCreate := zipWriter.Create("recipes.json")
-		if errZipCreate != nil {
-			log.Printf("Error creating recipes.json in ZIP: %v", errZipCreate)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create recipe file in ZIP"})
-			return
-		}
-		_, errWriteJSON := jsonFileInZip.Write(jsonData)
-		if errWriteJSON != nil {
-			log.Printf("Error writing recipes.json to ZIP: %v", errWriteJSON)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write recipe data to ZIP"})
-			return
-		}
-
-		// Add images to ZIP (in an 'images/' folder within the zip)
-		uniqueImageFiles := make(map[string]bool)
-		for _, recipe := range allRecipes {
-			if recipe.PhotoFilename != "" && recipe.PhotoFilename != placeholderImage {
-				uniqueImageFiles[recipe.PhotoFilename] = true
-			}
-		}
-		log.Printf("Found %d unique images for combined ZIP.", len(uniqueImageFiles))
-
-		for filename := range uniqueImageFiles {
-			filePath := filepath.Join(uploadsDir, filename)
-			fileInfo, errStat := os.Stat(filePath)
-			if os.IsNotExist(errStat) {
-				log.Printf("Image file not found for ZIP, skipping: %s", filePath)
-				continue
-			}
-			if errStat != nil {
-				log.Printf("Error stating image file %s for ZIP, skipping: %v", filePath, errStat)
-				continue
-			}
-			if fileInfo.IsDir() {
-				log.Printf("Path is a directory, skipping image for ZIP: %s", filePath)
-				continue
-			}
-
-			imgData, errRead := os.ReadFile(filePath)
-			if errRead != nil {
-				log.Printf("Error reading image file %s for ZIP: %v", filePath, errRead)
-				continue
-			}
-
-			// Store images in an "images" folder within the zip
-			imageFileInZip, errZipImgCreate := zipWriter.Create("images/" + filename)
-			if errZipImgCreate != nil {
-				log.Printf("Error creating image entry %s in ZIP: %v", filename, errZipImgCreate)
-				continue
-			}
-			_, errWriteImg := imageFileInZip.Write(imgData)
-			if errWriteImg != nil {
-				log.Printf("Error writing image %s to ZIP: %v", filename, errWriteImg)
-				continue
-			}
-		}
-
-		if err := zipWriter.Close(); err != nil {
-			log.Printf("Error closing zip writer for combined export: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize combined export archive"})
-			return
-		}
-		c.Header("Content-Disposition", "attachment; filename=gorecipes_export.zip")
-		c.Header("Content-Type", "application/zip")
-		c.Data(http.StatusOK, "application/zip", buf.Bytes())
-		log.Println("Combined recipes and images ZIP export completed successfully.")
-		return
-
-		// Case 2: Export Recipes only (JSON)
-	} else if options.ExportRecipes {
-		log.Println("Exporting Recipes only (JSON).")
-		if len(allRecipes) == 0 {
-			log.Println("No recipes found to export as JSON.")
-			// Return empty JSON array for consistency with file download
-		}
-		jsonData, errMarshal := json.MarshalIndent(allRecipes, "", "  ")
-		if errMarshal != nil {
-			log.Printf("Error marshalling recipes to JSON for export: %v", errMarshal)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal recipes to JSON"})
-			return
-		}
-		c.Header("Content-Disposition", "attachment; filename=recipes.json")
-		c.Data(http.StatusOK, "application/json; charset=utf-8", jsonData)
-		log.Println("Recipe JSON export completed successfully.")
-		return
-
-		// Case 3: Export Images only (ZIP)
-	} else if options.ExportImages {
-		log.Println("Exporting Images only (ZIP).")
-		uniqueImageFiles := make(map[string]bool)
-		for _, recipe := range allRecipes { // allRecipes is already fetched
-			if recipe.PhotoFilename != "" && recipe.PhotoFilename != placeholderImage {
-				uniqueImageFiles[recipe.PhotoFilename] = true
-			}
-		}
-		if len(uniqueImageFiles) == 0 {
-			log.Println("No images found to export.")
-			c.JSON(http.StatusOK, gin.H{"message": "No images found to export."})
-			return
-		}
-		log.Printf("Found %d unique images for image-only ZIP.", len(uniqueImageFiles))
-		buf := new(bytes.Buffer)
-		zipWriter := zip.NewWriter(buf)
-		for filename := range uniqueImageFiles {
-			filePath := filepath.Join(uploadsDir, filename)
-			fileInfo, errStat := os.Stat(filePath)
-			if os.IsNotExist(errStat) {
-				log.Printf("Image file not found for ZIP, skipping: %s", filePath)
-				continue
-			}
-			if errStat != nil {
-				log.Printf("Error stating image file %s for ZIP, skipping: %v", filePath, errStat)
-				continue
-			}
-			if fileInfo.IsDir() {
-				log.Printf("Path is a directory, skipping image for ZIP: %s", filePath)
-				continue
-			}
-
-			imgData, errRead := os.ReadFile(filePath)
-			if errRead != nil {
-				log.Printf("Error reading image file %s for zipping: %v", filePath, errRead)
-				continue
-			}
-
-			f, errZip := zipWriter.Create(filename)
-			if errZip != nil {
-				log.Printf("Error creating zip entry for %s: %v", filename, errZip)
-				continue
-			}
-			_, errWrite := f.Write(imgData)
-			if errWrite != nil {
-				log.Printf("Error writing image data to zip for %s: %v", filename, errWrite)
-				continue
-			}
-		}
-		if err := zipWriter.Close(); err != nil {
-			log.Printf("Error closing zip writer for image-only export: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to finalize image archive"})
-			return
-		}
-		c.Header("Content-Disposition", "attachment; filename=recipe_images.zip")
-		c.Header("Content-Type", "application/zip")
-		c.Data(http.StatusOK, "application/zip", buf.Bytes())
-		log.Println("Image ZIP export completed successfully.")
+	exportedData.RecipeIngredients, err = database.GetAllRecipeIngredients()
+	if err != nil {
+		log.Printf("Error fetching recipe ingredients for export: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch recipe ingredients for export"})
 		return
 	}
+
+	log.Printf("Successfully fetched data for export. Recipes: %d, Ingredients: %d, RecipeIngredients: %d",
+		len(exportedData.Recipes), len(exportedData.Ingredients), len(exportedData.RecipeIngredients))
+
+	c.Header("Content-Disposition", "attachment; filename=gorecipes_export.json")
+	c.Header("Content-Type", "application/json")
+	c.JSON(http.StatusOK, exportedData)
+}
+
+// ImportData handles importing data from a JSON file.
+// POST /api/v1/admin/import
+func ImportData(c *gin.Context) {
+	file, err := c.FormFile("importFile")
+	if err != nil {
+		log.Printf("Error getting import file: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Import file is required"})
+		return
+	}
+
+	openedFile, err := file.Open()
+	if err != nil {
+		log.Printf("Error opening import file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open import file"})
+		return
+	}
+	defer openedFile.Close()
+
+	byteValue, err := io.ReadAll(openedFile)
+	if err != nil {
+		log.Printf("Error reading import file: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read import file"})
+		return
+	}
+
+	var dataToImport models.ExportedData
+	if err := json.Unmarshal(byteValue, &dataToImport); err != nil {
+		log.Printf("Error unmarshalling import file: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON format in import file"})
+		return
+	}
+
+	log.Printf("Successfully parsed import file. Recipes: %d, Ingredients: %d, RecipeIngredients: %d",
+		len(dataToImport.Recipes), len(dataToImport.Ingredients), len(dataToImport.RecipeIngredients))
+
+	importedRecipes, importedIngredients, importedLinks, err := database.ImportRecipeDataBundle(dataToImport)
+	if err != nil {
+		log.Printf("Error importing data to database: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to import data: %v", err)})
+		return
+	}
+
+	log.Printf("Successfully imported data. Recipes: %d, Ingredients: %d, RecipeIngredients Links: %d",
+		importedRecipes, importedIngredients, importedLinks)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":               "Data imported successfully.",
+		"imported_recipes":      importedRecipes,
+		"imported_ingredients":  importedIngredients,
+		"imported_recipe_links": importedLinks,
+	})
 }
