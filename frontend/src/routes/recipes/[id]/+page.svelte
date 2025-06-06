@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Recipe } from '$lib/types';
-	// import RecipeComments from '$lib/components/RecipeComments.svelte'; // Comment import removed
+	import { onMount } from 'svelte'; // If not already imported
 
 	export let data: PageData;
 
@@ -56,6 +56,7 @@
 		<article class="recipe-content-card">
 			<h1 class="recipe-title">{recipe.name}</h1>
 
+			<!-- Original image display logic -->
 			<div class="recipe-image-container">
 				{#if imageUrl}
 					<img src={imageUrl} alt="Photo of {recipe.name}" class="recipe-photo" />

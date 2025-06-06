@@ -2,17 +2,20 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-	plugins: [sveltekit()],
-	server: {
-		proxy: {
-			// Proxy API requests to the Go backend
-			// Adjust the target port if your Go backend runs on a different port
-			'/api': {
-				target: 'http://192.168.1.45:8080', // Your Go backend address
-				changeOrigin: true, // Recommended for virtual hosted sites
-				// You might not need rewrite if your Go API already expects /api prefix
-				// rewrite: (path) => path.replace(/^\/api/, ''), // Example: if Go doesn't expect /api
-			}
-		}
-	}
+    plugins: [sveltekit()],
+    server: {
+        proxy: {
+            // Proxy API requests to the Go backend
+            '/api': {
+                target: 'http://192.168.1.45:8080', // Your Go backend address
+                changeOrigin: true,
+            },
+            // Add this new proxy rule for images
+            '/uploads/images': {
+                target: 'http://192.168.1.45:8080', // Your Go backend address
+                changeOrigin: true,
+                // No rewrite needed, as the backend serves from /uploads/images
+            }
+        }
+    }
 });
