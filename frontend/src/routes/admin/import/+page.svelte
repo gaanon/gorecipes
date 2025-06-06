@@ -42,7 +42,7 @@
 		feedbackType = 'info';
 
 		const formData = new FormData();
-		formData.append('recipes_file', selectedFile);
+		formData.append('importFile', selectedFile);
 
 		try {
 			const response = await fetch('/api/v1/admin/import', {

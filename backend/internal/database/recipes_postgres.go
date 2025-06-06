@@ -3,6 +3,7 @@ package database
 import (
 	"context" // Added for QueryContext
 	"database/sql"
+	// "errors" // For errors.As - No longer needed after ON CONFLICT DO NOTHING
 	"fmt"
 	"gorecipes/backend/internal/models"
 	"log"
@@ -190,11 +191,8 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 	var args []interface{}
 	argCount := 1
 
-	// Normalize ingredient filters
-	normalizedIngredientFilters := make([]string, len(ingredientFilters))
-	for i, filter := range ingredientFilters {
-		normalizedIngredientFilters[i] = normalizeIngredientName(filter)
-	}
+	// Ingredient filters are used directly from input (already pre-processed by handler)
+	// plainto_tsquery will handle further normalization for tsvector matching.
 
 	// Base query for fetching recipes
 	selectSQL := `SELECT r.id, r.name, r.method, r.photo_filename, r.created_at, r.updated_at,
@@ -219,20 +217,24 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 		argCount++
 	}
 
-	if len(normalizedIngredientFilters) > 0 {
-		// Join with a subquery that finds recipes matching all specified ingredients
-		joinSubquery := fmt.Sprintf(`
-			JOIN (
-				SELECT ri_f.recipe_id
-				FROM recipe_ingredients ri_f
-				JOIN ingredients i_f ON ri_f.ingredient_id = i_f.id
-				WHERE i_f.name = ANY($%d)
-				GROUP BY ri_f.recipe_id
-				HAVING COUNT(DISTINCT i_f.name) = $%d
-			) AS filtered_recipes ON r.id = filtered_recipes.recipe_id`, argCount, argCount+1)
-		joinClauses += joinSubquery
-		args = append(args, pq.Array(normalizedIngredientFilters), len(normalizedIngredientFilters))
-		argCount += 2
+	if len(ingredientFilters) > 0 {
+		for i, filterTerm := range ingredientFilters {
+			// Each filterTerm must match an ingredient in the recipe.
+			// We add a set of JOINs for each filterTerm to ensure AND logic.
+			ingredientAlias := fmt.Sprintf("i_f%d", i)
+			recipeIngredientAlias := fmt.Sprintf("ri_f%d", i)
+
+			joinSQLPart := fmt.Sprintf(`
+				JOIN recipe_ingredients %s ON r.id = %s.recipe_id
+				JOIN ingredients %s ON %s.ingredient_id = %s.id AND %s.normalized_name_tsvector @@ plainto_tsquery('english', $%d)`,
+				recipeIngredientAlias, recipeIngredientAlias,
+				ingredientAlias, recipeIngredientAlias, ingredientAlias,
+				ingredientAlias, argCount)
+			
+			joinClauses += joinSQLPart
+			args = append(args, filterTerm)
+			argCount++
+		}
 	}
 
 	whereClause := ""
@@ -248,8 +250,10 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
     if searchTerm != "" {
         currentArgsForCount = append(currentArgsForCount, searchTerm)
     }
-    if len(normalizedIngredientFilters) > 0 {
-        currentArgsForCount = append(currentArgsForCount, pq.Array(normalizedIngredientFilters), len(normalizedIngredientFilters))
+    if len(ingredientFilters) > 0 {
+        for _, filterTerm := range ingredientFilters {
+            currentArgsForCount = append(currentArgsForCount, filterTerm)
+        }
     }
 	err := DB.QueryRow(finalCountQuery, currentArgsForCount...).Scan(&totalCount)
 	if err != nil {
@@ -564,12 +568,8 @@ func ImportRecipeDataBundle(data models.ExportedData) (importedRecipes int, impo
 	for _, riFromFile := range data.RecipeIngredients {
 		createErr := insertRecipeIngredientLinkTx(tx, riFromFile, recipeOriginalIDToDbIDMap, ingredientOriginalIDToDbIDMap)
 		if createErr != nil {
-			// Log the specific link that failed, but continue if it's a duplicate error
-			if pqErr, ok := createErr.(*pq.Error); ok && pqErr.Code == "23505" { // unique_violation
-				log.Printf("Skipping duplicate recipe_ingredient link for recipe_id %s, ingredient_id %s: %v", riFromFile.RecipeID, riFromFile.IngredientID, createErr)
-				// Optionally, count skipped items if needed
-				continue
-			}
+			// Any error from insertRecipeIngredientLinkTx is now considered fatal
+			// as ON CONFLICT DO NOTHING should handle duplicates silently.
 			err = fmt.Errorf("error processing recipe_ingredient link for recipe '%s' and ingredient '%s': %w", riFromFile.RecipeID, riFromFile.IngredientID, createErr)
 			return
 		}
@@ -670,7 +670,7 @@ func insertRecipeIngredientLinkTx(tx *sql.Tx, ri models.RecipeIngredient, recipe
 	}
 
 	insertQuery := `INSERT INTO recipe_ingredients (id, recipe_id, ingredient_id, quantity_text, sort_order)
-					VALUES ($1, $2, $3, $4, $5)`
+					VALUES ($1, $2, $3, $4, $5) ON CONFLICT (recipe_id, ingredient_id) DO NOTHING`
 	_, err := tx.Exec(insertQuery, newLinkID, dbRecipeID, dbIngredientID, quantityText, ri.SortOrder)
 	if err != nil {
 		// The caller will check for unique_violation (pq.ErrorCode("23505"))

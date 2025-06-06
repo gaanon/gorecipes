@@ -160,6 +160,44 @@ CREATE TRIGGER trigger_set_normalized_ingredient_name
     FOR EACH ROW
     EXECUTE FUNCTION set_normalized_ingredient_name();
 
+-- Add tsvector column for full-text search on normalized ingredient names
+-- Ensure this is idempotent for repeated script execution
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'ingredients'
+          AND column_name = 'normalized_name_tsvector'
+    ) THEN
+        ALTER TABLE ingredients ADD COLUMN normalized_name_tsvector TSVECTOR;
+        RAISE NOTICE 'Column normalized_name_tsvector added to ingredients table.';
+    ELSE
+        RAISE NOTICE 'Column normalized_name_tsvector already exists in ingredients table.';
+    END IF;
+END $$;
+
+-- Create GIN index on the new tsvector column
+CREATE INDEX IF NOT EXISTS idx_ingredients_normalized_name_tsvector ON ingredients USING GIN(normalized_name_tsvector);
+
+-- Function to update the normalized_name_tsvector column
+CREATE OR REPLACE FUNCTION update_normalized_name_tsvector()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Ensure this runs after normalized_name is set/updated
+    NEW.normalized_name_tsvector = to_tsvector('english', COALESCE(NEW.normalized_name, ''));
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger to automatically update normalized_name_tsvector on insert or update
+DROP TRIGGER IF EXISTS trigger_update_normalized_name_tsvector ON ingredients;
+CREATE TRIGGER trigger_update_normalized_name_tsvector
+    BEFORE INSERT OR UPDATE ON ingredients
+    FOR EACH ROW
+    -- WHEN (pg_trigger_depth() = 0) -- Consider if needed based on other triggers
+    EXECUTE FUNCTION update_normalized_name_tsvector();
+
 -- Comments for documentation
 COMMENT ON TABLE recipes IS 'Core recipe information including name, cooking method, and photo';
 COMMENT ON TABLE ingredients IS 'Master list of all ingredients used across recipes';
