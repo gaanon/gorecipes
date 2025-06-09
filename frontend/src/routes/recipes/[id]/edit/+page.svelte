@@ -16,7 +16,7 @@
 	let formSuccess: string | null = null;
 
 	const recipeId = data.recipe?.id;
-	const baseImageUrl = 'http://localhost:8080/uploads/images/';
+	const baseImageUrl = '/uploads/images/';
 	$: currentImageUrl = currentPhotoFilename ? `${baseImageUrl}${currentPhotoFilename}` : '';
 
 	async function handleSubmit() {

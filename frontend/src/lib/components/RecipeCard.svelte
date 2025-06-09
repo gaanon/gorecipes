@@ -5,10 +5,7 @@
 	export let recipe: Recipe;
 	let showAddToPlanModal = false; // Added
 
-	// Construct the image URL. Assuming backend is running on localhost:8080
-	// and images are served from /uploads/images/
-	// This might need to be configurable later (e.g., via environment variables)
-	const baseImageUrl = 'http://localhost:8080/uploads/images/';
+	const baseImageUrl = '/uploads/images/';
 	$: imageUrl = recipe.photo_filename ? `${baseImageUrl}${recipe.photo_filename}` : ''; // Handle missing photo_filename gracefully
 
 	function openAddToPlanModal(event: MouseEvent) {
