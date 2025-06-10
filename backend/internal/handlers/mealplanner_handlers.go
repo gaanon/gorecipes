@@ -32,18 +32,9 @@ func CreateMealPlanEntryHandler(c *gin.Context) {
 		return
 	}
 
-	// Check if recipe exists using PostgreSQL version
-	recipeExists, err := database.RecipeExistsByID(req.RecipeID)
-	if err != nil {
-		log.Printf("[MealPlanner] Create: Error checking recipe existence for ID %s using PostgreSQL: %v", req.RecipeID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check recipe existence."})
-		return
-	}
-	if !recipeExists {
-		log.Printf("[MealPlanner] Create: Recipe with ID %s not found (checked with PostgreSQL).", req.RecipeID)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Recipe not found."})
-		return
-	}
+	// Skip recipe existence check to allow custom recipe names
+	// Custom recipes (text-only entries) can be added to meal plans without existing in the recipe database
+	log.Printf("[MealPlanner] Create: Adding recipe/custom entry '%s' to meal plan for date %s", req.RecipeID, req.Date)
 
 	// Prepare the entry. ID and CreatedAt will be set by the database.CreateMealPlanEntry function.
 	// The Date field in entry will also be normalized to UTC midnight by CreateMealPlanEntry.

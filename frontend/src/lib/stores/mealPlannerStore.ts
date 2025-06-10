@@ -162,9 +162,29 @@ export async function removeRecipeFromMealPlan(entryId: string): Promise<void> {
 	}
 }
 
-// Initial fetch when the store is first loaded/subscribed to
-// This requires a component to subscribe to trigger it, or a more explicit call.
-// For now, components using the store will trigger fetches as needed.
-// currentPlannerWeekStartDate.subscribe(startDate => {
-//     if (startDate) fetchMealPlanForWeek(startDate);
-// });
+/**
+ * Adds a custom recipe name directly to the meal plan for a specific date.
+ * This doesn't create a recipe in the database, just adds the text as a meal plan entry.
+ */
+export async function addCustomRecipeToMealPlan(date: Date, recipeName: string): Promise<MealPlanEntry | null> {
+	const dateStr = formatDateToYYYYMMDD(date);
+	try {
+		const response = await fetch(`${API_BASE_URL}/entries`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ date: dateStr, recipe_id: recipeName }), // Use recipe name as ID for custom recipes
+		});
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({ error: 'Failed to add custom recipe to meal plan.' }));
+			throw new Error(errorData.error || `Failed to add custom recipe: ${response.statusText}`);
+		}
+		const newEntry: MealPlanEntry = await response.json();
+		// Refetch the week's data to update the UI
+		await fetchMealPlanForWeek(get(currentPlannerWeekStartDate));
+		return newEntry;
+	} catch (error) {
+		console.error("Error adding custom recipe to meal plan:", error);
+		throw error; // Re-throw to be caught by UI
+	}
+}
+

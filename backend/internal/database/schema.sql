@@ -52,12 +52,38 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
 -- Create meal_plan_entries table
 CREATE TABLE IF NOT EXISTS meal_plan_entries (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    recipe_id TEXT NOT NULL, -- Changed from UUID to TEXT to allow custom recipe names
     date DATE NOT NULL,
     notes TEXT NULL, -- Added notes column
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE(recipe_id, date) -- Prevent duplicate recipe assignments for the same date
 );
+
+-- Remove the foreign key constraint if it exists to allow custom recipe names
+-- This allows meal_plan_entries.recipe_id to be either a UUID (for real recipes) or a custom string
+DO $$
+BEGIN
+    -- Drop foreign key constraint if it exists
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'meal_plan_entries_recipe_id_fkey' 
+        AND table_name = 'meal_plan_entries'
+    ) THEN
+        ALTER TABLE meal_plan_entries DROP CONSTRAINT meal_plan_entries_recipe_id_fkey;
+        RAISE NOTICE 'Foreign key constraint meal_plan_entries_recipe_id_fkey dropped to allow custom recipe names.';
+    END IF;
+    
+    -- Change column type from UUID to TEXT if it's currently UUID
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'meal_plan_entries' 
+        AND column_name = 'recipe_id' 
+        AND data_type = 'uuid'
+    ) THEN
+        ALTER TABLE meal_plan_entries ALTER COLUMN recipe_id TYPE TEXT;
+        RAISE NOTICE 'Column recipe_id in meal_plan_entries changed from UUID to TEXT to support custom recipe names.';
+    END IF;
+END $$;
 
 -- Create indexes for performance
 

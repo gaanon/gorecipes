@@ -8,7 +8,8 @@
 		fetchMealPlanForWeek,
 		removeRecipeFromMealPlan,
 		getStartOfWeek,
-		formatDateToYYYYMMDD
+		formatDateToYYYYMMDD,
+		addCustomRecipeToMealPlan
 	} from '$lib/stores/mealPlannerStore';
 	import type { MealPlanEntry } from '$lib/models/mealPlanEntry';
 	import type { Recipe } from '$lib/types'; // For displaying recipe names, etc.
@@ -63,14 +64,15 @@
 		const dateStr = formatDateToYYYYMMDD(selDate);
 		const entries = entriesMap.get(dateStr) || [];
 		
-		// Fetch recipe details for each entry
-		// This is a simplified version; in a real app, you might batch these or have a recipe store
-		const detailedEntries: { entry: MealPlanEntry, recipeDetails?: Recipe }[] = [];
-		for (const entry of entries) {
+	// Fetch recipe details for each entry
+	// Only fetch for entries that look like UUIDs (real recipes), skip custom recipe names
+	const detailedEntries: { entry: MealPlanEntry, recipeDetails?: Recipe }[] = [];
+	for (const entry of entries) {
+		// Check if recipe_id looks like a UUID (8-4-4-4-12 hex characters)
+		const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		if (uuidPattern.test(entry.recipe_id)) {
+			// This looks like a real recipe UUID, fetch its details
 			try {
-				// TODO: Implement a more efficient way to get recipe details if not already available
-				// For now, assuming we might need to fetch. This could be slow.
-				// Consider a recipe store or batching API calls.
 				const res = await fetch(`/api/v1/recipes/${entry.recipe_id}`);
 				if (res.ok) {
 					const recipe: Recipe = await res.json();
@@ -82,7 +84,11 @@
 				console.error(`Failed to fetch recipe ${entry.recipe_id}`, e);
 				detailedEntries.push({ entry });
 			}
+		} else {
+			// This is a custom recipe name, don't try to fetch it
+			detailedEntries.push({ entry });
 		}
+	}
 		recipesForSelectedDay = detailedEntries;
 	}
 
@@ -129,6 +135,32 @@
 			} catch (error) {
 				alert(`Error removing recipe: ${error instanceof Error ? error.message : 'Unknown error'}`);
 			}
+		}
+	}
+
+	// --- Custom Recipe Name Handling for Meal Plan ---
+	let customRecipeName = '';
+	let isAddingCustomRecipe = false;
+
+	async function handleAddCustomRecipeToMealPlan() {
+		if (!customRecipeName.trim()) {
+			return;
+		}
+
+		const selectedDate = get(selectedPlannerDate);
+		if (!selectedDate) {
+			return;
+		}
+
+		isAddingCustomRecipe = true;
+
+		try {
+			await addCustomRecipeToMealPlan(selectedDate, customRecipeName.trim());
+			customRecipeName = ''; // Clear the input
+		} catch (error) {
+			alert(`Error adding recipe: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		} finally {
+			isAddingCustomRecipe = false;
 		}
 	}
 
@@ -195,17 +227,43 @@
 			<ul>
 				{#each recipesForSelectedDay as item (item.entry.id)}
 					<li>
-						<a href="/recipes/{item.entry.recipe_id}" class="recipe-link">
-							{item.recipeDetails?.name || `Recipe ID: ${item.entry.recipe_id}`}
-						</a>
+						{#if item.recipeDetails}
+							<a href="/recipes/{item.entry.recipe_id}" class="recipe-link">
+								{item.recipeDetails.name}
+							</a>
+						{:else}
+							<span class="custom-recipe-name">{item.entry.recipe_id}</span>
+						{/if}
 						<button class="remove-meal-button" on:click={() => handleRemoveRecipe(item.entry.id)} title="Remove from plan">&times;</button>
 					</li>
 				{/each}
 			</ul>
-		{:else}
+		{/if}
+
+		<!-- Add custom recipe input -->
+		<div class="add-custom-recipe">
+			<input 
+				type="text" 
+				bind:value={customRecipeName} 
+				placeholder="Add custom recipe..." 
+				class="custom-recipe-input"
+				disabled={isAddingCustomRecipe}
+				on:keydown={(e) => e.key === 'Enter' && handleAddCustomRecipeToMealPlan()}
+			/>
+			<button 
+				class="add-custom-btn" 
+				on:click={handleAddCustomRecipeToMealPlan}
+				disabled={isAddingCustomRecipe || !customRecipeName.trim()}
+			>
+				{isAddingCustomRecipe ? '+' : '+'}
+			</button>
+		</div>
+
+		{#if recipesForSelectedDay.length === 0}
 			<p class="no-meals-text">No meals planned for this day.</p>
 		{/if}
 	</div>
+
 </aside>
 {/if}
 
@@ -367,5 +425,65 @@
 		color: var(--color-text-light);
 		text-align: center;
 		margin-top: 20px;
+	}
+
+	/* Custom recipe input styles */
+	.add-custom-recipe {
+		display: flex;
+		gap: 8px;
+		margin: 15px 0;
+		padding: 10px;
+		background-color: var(--color-surface);
+		border: 1px solid var(--color-border-light, #eee);
+		border-radius: var(--border-radius-sm);
+	}
+
+	.custom-recipe-input {
+		flex: 1;
+		padding: 8px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--border-radius-sm);
+		font-size: 0.9em;
+		outline: none;
+	}
+
+	.custom-recipe-input:focus {
+		border-color: var(--color-primary);
+		box-shadow: 0 0 0 2px var(--color-primary-light, rgba(0, 123, 255, 0.25));
+	}
+
+	.custom-recipe-input:disabled {
+		background-color: var(--color-background-disabled, #f5f5f5);
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	.add-custom-btn {
+		padding: 8px 12px;
+		background-color: var(--color-primary);
+		color: white;
+		border: none;
+		border-radius: var(--border-radius-sm);
+		cursor: pointer;
+		font-size: 1.1em;
+		font-weight: bold;
+		min-width: 40px;
+		transition: background-color 0.2s;
+	}
+
+	.add-custom-btn:hover:not(:disabled) {
+		background-color: var(--color-primary-dark);
+	}
+
+	.add-custom-btn:disabled {
+		background-color: var(--color-background-disabled, #ccc);
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	.custom-recipe-name {
+		color: var(--color-text);
+		font-style: italic;
+		flex-grow: 1;
 	}
 </style>
