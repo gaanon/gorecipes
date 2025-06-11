@@ -3,6 +3,7 @@ package database
 import (
 	"context" // Added for QueryContext
 	"database/sql"
+
 	// "errors" // For errors.As - No longer needed after ON CONFLICT DO NOTHING
 	"fmt"
 	"gorecipes/backend/internal/models"
@@ -10,19 +11,40 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq" // For pq.Array
 	"github.com/google/uuid"
+	"github.com/lib/pq" // For pq.Array
 )
 
 // extractIngredientNameParts is a placeholder for a utility function
 // that will parse an ingredient string (e.g., "1 cup flour") into its quantity ("1 cup")
 // and normalized name ("flour"). This will be properly implemented later.
 func extractIngredientNameParts(fullIngredient string) (quantity string, name string, err error) {
-	parts := strings.SplitN(fullIngredient, " ", 2)
+	// More robustly separate quantity from the name.
+	// This is a simplified approach. A more advanced solution could use regex
+	// to identify numeric quantities, units, etc.
+	// For now, we'll assume the first word might be a quantity if it's numeric,
+	// otherwise the whole string is the name.
+
+	trimmedIngredient := strings.TrimSpace(fullIngredient)
+	parts := strings.SplitN(trimmedIngredient, " ", 2)
+
 	if len(parts) == 1 {
-		return "", strings.ToLower(strings.TrimSpace(parts[0])), nil // Assume it's just the name
+		// If there's only one part, it's the ingredient name.
+		return "", strings.ToLower(trimmedIngredient), nil
 	}
-	return strings.TrimSpace(parts[0]), strings.ToLower(strings.TrimSpace(parts[1])), nil
+
+	// Check if the first part is likely a quantity (e.g., numeric, fraction, or common measure word)
+	// This is a basic check. A library or more complex regex would be better.
+	// For this fix, we'll just treat the whole string as the name part and quantity as empty,
+	// as the primary goal is to stop "tomato sauce" from becoming "sauce".
+	// The UI sends the full string, and we want to store it as such.
+	// The `quantity_text` was intended for things like "1 cup", where "1 cup" is the quantity
+	// and "flour" is the name. The current implementation is too naive for that.
+
+	// A better simple logic: if the first part contains a number, it's a quantity.
+	// For now, let's just treat the whole thing as the name and not split.
+	// This means quantity will be empty, but the ingredient name will be correct.
+	return "", strings.ToLower(trimmedIngredient), nil
 }
 
 // normalizeIngredientName is a placeholder for a utility function
@@ -230,7 +252,7 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 				recipeIngredientAlias, recipeIngredientAlias,
 				ingredientAlias, recipeIngredientAlias, ingredientAlias,
 				ingredientAlias, argCount)
-			
+
 			joinClauses += joinSQLPart
 			args = append(args, filterTerm)
 			argCount++
@@ -245,16 +267,16 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 	// Construct final count query
 	finalCountQuery := countSQL + joinClauses + whereClause
 	var totalCount int
-    // Re-evaluate arg slicing for count query
-    currentArgsForCount := []interface{}{}
-    if searchTerm != "" {
-        currentArgsForCount = append(currentArgsForCount, searchTerm)
-    }
-    if len(ingredientFilters) > 0 {
-        for _, filterTerm := range ingredientFilters {
-            currentArgsForCount = append(currentArgsForCount, filterTerm)
-        }
-    }
+	// Re-evaluate arg slicing for count query
+	currentArgsForCount := []interface{}{}
+	if searchTerm != "" {
+		currentArgsForCount = append(currentArgsForCount, searchTerm)
+	}
+	if len(ingredientFilters) > 0 {
+		for _, filterTerm := range ingredientFilters {
+			currentArgsForCount = append(currentArgsForCount, filterTerm)
+		}
+	}
 	err := DB.QueryRow(finalCountQuery, currentArgsForCount...).Scan(&totalCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error counting recipes: %w", err)
@@ -282,7 +304,7 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 		var recipe models.Recipe
 		var ingredientsList pq.StringArray
 		if err := rows.Scan(
-			&recipe.ID, &recipe.Name, &recipe.Method, &recipe.PhotoFilename, 
+			&recipe.ID, &recipe.Name, &recipe.Method, &recipe.PhotoFilename,
 			&recipe.CreatedAt, &recipe.UpdatedAt, &ingredientsList,
 		); err != nil {
 			return nil, 0, fmt.Errorf("error scanning recipe row: %w", err)
@@ -490,12 +512,12 @@ func DeleteRecipe(id string) error {
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		// This error is less critical if the delete query itself didn't fail, 
+		// This error is less critical if the delete query itself didn't fail,
 		// but good to log for diagnostics.
 		log.Printf("Warning: could not get rows affected after deleting recipe ID %s: %v", id, err)
 	}
 	if rowsAffected == 0 {
-		// If no rows were affected, the recipe didn't exist. 
+		// If no rows were affected, the recipe didn't exist.
 		// This might not be an error condition depending on desired idempotency.
 		// For now, we'll consider it a success if no error occurred during exec.
 		log.Printf("Recipe with ID %s not found for deletion, or already deleted.", id)
@@ -550,7 +572,6 @@ func ImportRecipeDataBundle(data models.ExportedData) (importedRecipes int, impo
 		importedIngredients++
 	}
 	log.Printf("Processed %d ingredients. Map size: %d", len(data.Ingredients), len(ingredientOriginalIDToDbIDMap))
-
 
 	// 2. Import Recipes
 	for _, recFromFile := range data.Recipes {
@@ -679,4 +700,3 @@ func insertRecipeIngredientLinkTx(tx *sql.Tx, ri models.RecipeIngredient, recipe
 	// log.Printf("Created recipe_ingredient link: RecipeDB_ID='%s', IngredientDB_ID='%s', Qty='%s'", dbRecipeID, dbIngredientID, ri.QuantityText)
 	return nil
 }
-

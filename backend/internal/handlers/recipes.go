@@ -336,10 +336,12 @@ func CreateRecipe(c *gin.Context) {
 	recipe.Ingredients = []string{}
 	if ingredientsStr != "" {
 		rawIngredients := strings.Split(ingredientsStr, ",")
+		uniqueIngredients := make(map[string]bool)
 		for _, ing := range rawIngredients {
 			trimmedIng := strings.TrimSpace(ing)
-			if trimmedIng != "" {
+			if trimmedIng != "" && !uniqueIngredients[trimmedIng] {
 				recipe.Ingredients = append(recipe.Ingredients, trimmedIng)
+				uniqueIngredients[trimmedIng] = true
 			}
 		}
 	}
@@ -748,7 +750,6 @@ func GetIngredientsAutocomplete(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, matchingIngredients)
 }
-
 
 // ExportData handles exporting all recipe and related data.
 // POST /api/v1/admin/export
