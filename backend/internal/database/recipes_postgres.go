@@ -287,7 +287,7 @@ func GetAllRecipes(searchTerm string, ingredientFilters []string, page int, page
 	}
 
 	// Construct final select query with ordering and pagination
-	orderByClause := " ORDER BY r.updated_at DESC"
+	orderByClause := " ORDER BY r.name ASC"
 	offset := (page - 1) * pageSize
 	paginationClause := fmt.Sprintf(" LIMIT $%d OFFSET $%d", argCount, argCount+1)
 	finalSelectQuery := selectSQL + joinClauses + whereClause + orderByClause + paginationClause
