@@ -700,3 +700,144 @@ func insertRecipeIngredientLinkTx(tx *sql.Tx, ri models.RecipeIngredient, recipe
 	// log.Printf("Created recipe_ingredient link: RecipeDB_ID='%s', IngredientDB_ID='%s', Qty='%s'", dbRecipeID, dbIngredientID, ri.QuantityText)
 	return nil
 }
+
+// CreateComment inserts a new comment into the database.
+func CreateComment(comment models.Comment) (*models.Comment, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	// Set timestamps
+	comment.CreatedAt = time.Now().UTC()
+	comment.UpdatedAt = comment.CreatedAt
+
+	query := `INSERT INTO comments (id, recipe_id, author, content, created_at, updated_at)
+			  VALUES ($1, $2, $3, $4, $5, $6)
+			  RETURNING id, recipe_id, author, content, created_at, updated_at`
+
+	err := DB.QueryRow(query,
+		comment.ID, comment.RecipeID, comment.Author, comment.Content,
+		comment.CreatedAt, comment.UpdatedAt).
+		Scan(&comment.ID, &comment.RecipeID, &comment.Author, &comment.Content,
+			&comment.CreatedAt, &comment.UpdatedAt)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert comment: %w", err)
+	}
+
+	return &comment, nil
+}
+
+// GetCommentsByRecipeID retrieves all comments for a given recipe ID.
+func GetCommentsByRecipeID(recipeID string) ([]models.Comment, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	query := `SELECT id, recipe_id, author, content, created_at, updated_at
+			  FROM comments
+			  WHERE recipe_id = $1
+			  ORDER BY created_at ASC`
+
+	rows, err := DB.Query(query, recipeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query comments for recipe ID %s: %w", recipeID, err)
+	}
+	defer rows.Close()
+
+	var comments []models.Comment
+	for rows.Next() {
+		var comment models.Comment
+		if err := rows.Scan(
+			&comment.ID, &comment.RecipeID, &comment.Author, &comment.Content,
+			&comment.CreatedAt, &comment.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan comment row: %w", err)
+		}
+		comments = append(comments, comment)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating comment rows: %w", err)
+	}
+
+	return comments, nil
+}
+
+// GetCommentByID retrieves a single comment by its ID.
+func GetCommentByID(commentID string) (*models.Comment, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	var comment models.Comment
+	query := `SELECT id, recipe_id, author, content, created_at, updated_at
+			  FROM comments
+			  WHERE id = $1`
+
+	err := DB.QueryRow(query, commentID).Scan(
+		&comment.ID, &comment.RecipeID, &comment.Author, &comment.Content,
+		&comment.CreatedAt, &comment.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("comment with ID %s not found", commentID)
+		}
+		return nil, fmt.Errorf("failed to query comment with ID %s: %w", commentID, err)
+	}
+
+	return &comment, nil
+}
+
+// UpdateComment updates an existing comment in the database.
+func UpdateComment(comment models.Comment) (*models.Comment, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	comment.UpdatedAt = time.Now().UTC()
+
+	query := `UPDATE comments
+			  SET content = $1, updated_at = $2
+			  WHERE id = $3
+			  RETURNING id, recipe_id, author, content, created_at, updated_at`
+
+	err := DB.QueryRow(query,
+		comment.Content, comment.UpdatedAt, comment.ID).
+		Scan(&comment.ID, &comment.RecipeID, &comment.Author, &comment.Content,
+			&comment.CreatedAt, &comment.UpdatedAt)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("comment with ID %s not found for update", comment.ID)
+		}
+		return nil, fmt.Errorf("failed to update comment with ID %s: %w", comment.ID, err)
+	}
+
+	return &comment, nil
+}
+
+// DeleteComment deletes a comment from the database by its ID.
+func DeleteComment(commentID string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	query := `DELETE FROM comments WHERE id = $1`
+
+	res, err := DB.Exec(query, commentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete comment with ID %s: %w", commentID, err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected for comment ID %s: %w", commentID, err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("comment with ID %s not found for deletion", commentID)
+	}
+
+	return nil
+}

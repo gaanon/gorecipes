@@ -42,6 +42,16 @@ func SetupRouter() *gin.Engine {
 				recipeWithID.DELETE("", handlers.DeleteRecipe) // DELETE /api/v1/recipes/:id
 				// recipeWithID.POST("/image", handlers.UploadRecipeImage) // Example for specific image upload
 			}
+			// Comment routes nested under a specific recipe
+			recipeWithID.POST("/comments", handlers.CreateCommentHandler)        // POST /api/v1/recipes/:id/comments
+			recipeWithID.GET("/comments", handlers.GetCommentsByRecipeIDHandler) // GET /api/v1/recipes/:id/comments
+		}
+
+		// Comment routes (for specific comment operations)
+		comments := apiV1.Group("/comments")
+		{
+			comments.PUT("/:id", handlers.UpdateCommentHandler)    // PUT    /api/v1/comments/:id
+			comments.DELETE("/:id", handlers.DeleteCommentHandler) // DELETE /api/v1/comments/:id
 		}
 
 		// Ingredient routes

@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS meal_plan_entries (
     UNIQUE(recipe_id, date) -- Prevent duplicate recipe assignments for the same date
 );
 
+-- Create comments table
+CREATE TABLE IF NOT EXISTS comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 -- Remove the foreign key constraint if it exists to allow custom recipe names
 -- This allows meal_plan_entries.recipe_id to be either a UUID (for real recipes) or a custom string
 DO $$
@@ -125,6 +135,11 @@ CREATE TRIGGER update_recipes_updated_at BEFORE UPDATE ON recipes
 -- Create trigger to automatically update updated_at for ingredients
 DROP TRIGGER IF EXISTS update_ingredients_updated_at ON ingredients;
 CREATE TRIGGER update_ingredients_updated_at BEFORE UPDATE ON ingredients
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Create trigger to automatically update updated_at for comments
+DROP TRIGGER IF EXISTS update_comments_updated_at ON comments;
+CREATE TRIGGER update_comments_updated_at BEFORE UPDATE ON comments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Create a view for recipes with ingredient count (useful for API responses)
@@ -229,6 +244,7 @@ COMMENT ON TABLE recipes IS 'Core recipe information including name, cooking met
 COMMENT ON TABLE ingredients IS 'Master list of all ingredients used across recipes';
 COMMENT ON TABLE recipe_ingredients IS 'Junction table linking recipes to their ingredients with quantities';
 COMMENT ON TABLE meal_plan_entries IS 'Meal planning entries associating recipes with specific dates';
+COMMENT ON TABLE comments IS 'User comments on recipes';
 
 COMMENT ON COLUMN ingredients.normalized_name IS 'Automatically generated normalized version of ingredient name for consistent searching';
 COMMENT ON COLUMN recipe_ingredients.quantity_text IS 'Original quantity string as entered by user (e.g., "2 cups", "1 large onion")';

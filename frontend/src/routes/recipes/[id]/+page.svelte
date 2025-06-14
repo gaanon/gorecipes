@@ -1,10 +1,28 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
-	import type { Recipe } from '$lib/types';
-	import { onMount } from 'svelte'; // If not already imported
+	import type { Comment, Recipe } from '$lib/types';
+	import { onMount } from 'svelte';
 
 	export let data: PageData;
+
+	let comments: Comment[] = [];
+	let commentsLoading = true;
+	let commentsError: string | null = null;
+
+	let newCommentAuthor = '';
+	let newCommentContent = '';
+	let isSubmittingComment = false;
+	let commentSubmissionError: string | null = null;
+
+	let editingCommentId: string | null = null;
+	let editingCommentContent: string = '';
+	let editingCommentAuthor: string = '';
+	let isUpdatingComment = false;
+	let commentUpdateError: string | null = null;
+
+	let isDeletingComment = false;
+	let commentDeleteError: string | null = null;
 
 	$: recipe = data.recipe as Recipe | null;
 	$: error = data.error as string | null; // Error from loading the page
@@ -45,6 +63,124 @@
 			isDeleting = false;
 		}
 	}
+
+	async function fetchComments() {
+		if (!recipe || !recipe.id) return;
+
+		commentsLoading = true;
+		commentsError = null;
+		try {
+			const response = await fetch(`/api/v1/recipes/${recipe.id}/comments`);
+			if (response.ok) {
+				comments = await response.json();
+			} else {
+				const errorData = await response.json();
+				commentsError = errorData.error || `Failed to fetch comments. Status: ${response.status}`;
+			}
+		} catch (err: any) {
+			commentsError = err.message || 'An unexpected network error occurred while fetching comments.';
+		} finally {
+			commentsLoading = false;
+		}
+	}
+
+	async function handleSubmitComment() {
+		if (!recipe || !recipe.id || !newCommentAuthor || !newCommentContent) return;
+
+		isSubmittingComment = true;
+		commentSubmissionError = null;
+
+		try {
+			const response = await fetch(`/api/v1/recipes/${recipe.id}/comments`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ author: newCommentAuthor, content: newCommentContent })
+			});
+
+			if (response.ok) {
+				newCommentAuthor = '';
+				newCommentContent = '';
+				await fetchComments(); // Refresh comments after successful submission
+			} else {
+				const errorData = await response.json();
+				commentSubmissionError = errorData.error || `Failed to submit comment. Status: ${response.status}`;
+			}
+		} catch (err: any) {
+			commentSubmissionError = err.message || 'An unexpected network error occurred during comment submission.';
+		} finally {
+			isSubmittingComment = false;
+		}
+	}
+
+	function startEdit(comment: Comment) {
+		editingCommentId = comment.id;
+		editingCommentContent = comment.content;
+		editingCommentAuthor = comment.author;
+	}
+
+	async function handleUpdateComment(commentId: string) {
+		if (!editingCommentContent || !editingCommentAuthor) return;
+
+		isUpdatingComment = true;
+		commentUpdateError = null;
+
+		try {
+			const response = await fetch(`/api/v1/comments/${commentId}`, {
+				method: 'PUT',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ author: editingCommentAuthor, content: editingCommentContent })
+			});
+
+			if (response.ok) {
+				editingCommentId = null;
+				editingCommentContent = '';
+				editingCommentAuthor = '';
+				await fetchComments(); // Refresh comments after successful update
+			} else {
+				const errorData = await response.json();
+				commentUpdateError = errorData.error || `Failed to update comment. Status: ${response.status}`;
+			}
+		} catch (err: any) {
+			commentUpdateError = err.message || 'An unexpected network error occurred during comment update.';
+		} finally {
+			isUpdatingComment = false;
+		}
+	}
+
+	async function handleDeleteComment(commentId: string) {
+		const confirmed = window.confirm('Are you sure you want to delete this comment?');
+		if (!confirmed) return;
+
+		isDeletingComment = true;
+		commentDeleteError = null;
+
+		try {
+			const response = await fetch(`/api/v1/comments/${commentId}`, {
+				method: 'DELETE'
+			});
+
+			if (response.ok) {
+				await fetchComments(); // Refresh comments after successful deletion
+			} else {
+				const errorData = await response.json();
+				commentDeleteError = errorData.error || `Failed to delete comment. Status: ${response.status}`;
+			}
+		} catch (err: any) {
+			commentDeleteError = err.message || 'An unexpected network error occurred during comment deletion.';
+		} finally {
+			isDeletingComment = false;
+		}
+	}
+
+	onMount(() => {
+		if (recipe) {
+			fetchComments();
+		}
+	});
 </script>
 
 <svelte:head>
@@ -125,6 +261,88 @@
 				<div class="message error-message delete-error-feedback">{deleteError}</div>
 			{/if}
 
+			<section class="comments-section">
+				<h2 class="section-title">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="22" height="22"><path fill-rule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.336-3.117C2.47 12.118 2 11.104 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zM9 9h2v2H9V9z" clip-rule="evenodd" /></svg>
+					Comments
+				</h2>
+
+				{#if commentsLoading}
+					<div class="loading-state">
+						<span class="spinner small-spinner"></span> Loading comments...
+					</div>
+				{:else if commentsError}
+					<div class="message error-message">{commentsError}</div>
+				{:else if comments.length === 0}
+					<p class="empty-state-text">No comments yet. Be the first to leave one!</p>
+				{:else}
+					<ul class="comments-list">
+						{#each comments as comment (comment.id)}
+							<li class="comment-item">
+								{#if editingCommentId === comment.id}
+									<div class="edit-comment-form">
+										<input type="text" bind:value={editingCommentAuthor} placeholder="Your Name" class="input-field" />
+										<textarea bind:value={editingCommentContent} placeholder="Your comment..." class="textarea-field"></textarea>
+										<div class="edit-actions">
+											<button on:click={() => handleUpdateComment(comment.id)} disabled={isUpdatingComment} class="button primary small">
+												{#if isUpdatingComment}
+													<span class="spinner small-spinner"></span> Updating...
+												{:else}
+													Save
+												{/if}
+											</button>
+											<button on:click={() => (editingCommentId = null)} class="button secondary small">Cancel</button>
+										</div>
+										{#if commentUpdateError}
+											<div class="message error-message">{commentUpdateError}</div>
+										{/if}
+									</div>
+								{:else}
+									<p class="comment-meta">
+										<strong>{comment.author}</strong> on {new Date(comment.created_at).toLocaleString()}
+									</p>
+									<p class="comment-content">{comment.content}</p>
+									<div class="comment-actions">
+										<button on:click={() => startEdit(comment)} class="button edit-button small">Edit</button>
+										<button on:click={() => handleDeleteComment(comment.id)} disabled={isDeletingComment} class="button danger small">
+											{#if isDeletingComment}
+												<span class="spinner small-spinner"></span> Deleting...
+											{:else}
+												Delete
+											{/if}
+										</button>
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+
+				<div class="new-comment-form-container">
+					<h3>Leave a Comment</h3>
+					<form on:submit|preventDefault={handleSubmitComment} class="comment-form">
+						<div class="form-group">
+							<label for="author">Your Name:</label>
+							<input type="text" id="author" bind:value={newCommentAuthor} required class="input-field" />
+						</div>
+						<div class="form-group">
+							<label for="content">Your Comment:</label>
+							<textarea id="content" bind:value={newCommentContent} required class="textarea-field"></textarea>
+						</div>
+						<button type="submit" disabled={isSubmittingComment} class="button primary">
+							{#if isSubmittingComment}
+								<span class="spinner small-spinner"></span> Submitting...
+							{:else}
+								Submit Comment
+							{/if}
+						</button>
+						{#if commentSubmissionError}
+							<div class="message error-message">{commentSubmissionError}</div>
+						{/if}
+					</form>
+				</div>
+			</section>
+
 			<!-- Comments Section Removed -->
 			<!--
 			<section class="comments-container-section">
@@ -148,7 +366,7 @@
 	{/if}
 </div>
 
-<style>
+<style global>
 	.recipe-detail-page { /* Extends .main-container */
 		padding-bottom: 40px; /* Extra space at bottom */
 	}
@@ -381,4 +599,117 @@
 		border-top-color: var(--color-primary);
 	}
 
+	/* Global styles for form elements, if not already defined in app.css */
+	.input-field, .textarea-field {
+		width: 100%;
+		padding: 10px 12px;
+		margin-bottom: 15px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--border-radius);
+		font-size: 1em;
+		box-sizing: border-box; /* Include padding and border in the element's total width and height */
+		background-color: var(--color-background);
+		color: var(--color-text);
+	}
+
+	.textarea-field {
+		min-height: 100px;
+		resize: vertical;
+	}
+
+	.input-field:focus, .textarea-field:focus {
+		border-color: var(--color-primary);
+		outline: none;
+		box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.2);
+	}
+
+	.form-group label {
+		display: block;
+		margin-bottom: 8px;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+
+	.button.small {
+		padding: 6px 12px;
+		font-size: 0.85em;
+	}
+
+	/* Comments Section Specific Styles */
+	.comments-section {
+		background-color: var(--color-surface);
+		border-radius: var(--border-radius);
+		box-shadow: var(--shadow-md);
+		margin-top: 20px;
+		padding: 25px 30px;
+	}
+
+	.comments-list {
+		list-style: none;
+		padding: 0;
+		margin-top: 20px;
+	}
+
+	.comment-item {
+		border-bottom: 1px solid var(--color-border);
+		padding: 15px 0;
+	}
+
+	.comment-item:last-child {
+		border-bottom: none;
+	}
+
+	.comment-meta {
+		font-size: 0.9em;
+		color: var(--color-text-light);
+		margin-bottom: 5px;
+	}
+
+	.comment-meta strong {
+		color: var(--color-primary);
+	}
+
+	.comment-content {
+		font-size: 1em;
+		line-height: 1.6;
+		color: var(--color-text);
+		margin-bottom: 10px;
+	}
+
+	.comment-actions {
+		display: flex;
+		gap: 10px;
+		margin-top: 10px;
+	}
+
+	.new-comment-form-container {
+		margin-top: 30px;
+		padding-top: 20px;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.new-comment-form-container h3 {
+		font-size: 1.4em;
+		color: var(--color-primary);
+		margin-bottom: 20px;
+	}
+
+	.edit-comment-form {
+		background-color: var(--color-background);
+		padding: 15px;
+		border-radius: var(--border-radius);
+		margin-top: 10px;
+		margin-bottom: 10px;
+	}
+
+	.edit-comment-form .input-field,
+	.edit-comment-form .textarea-field {
+		margin-bottom: 10px;
+	}
+
+	.edit-actions {
+		display: flex;
+		gap: 10px;
+		margin-top: 10px;
+	}
 </style>

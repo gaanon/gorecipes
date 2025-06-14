@@ -15,3 +15,12 @@ export interface PaginatedRecipesResponse {
 	limit: number;
 	total_pages: number;
 }
+
+export interface Comment {
+	id: string;
+	recipe_id: string;
+	author: string;
+	content: string;
+	created_at: string; // ISO date string
+	updated_at: string; // ISO date string
+}

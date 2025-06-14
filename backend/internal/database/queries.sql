@@ -159,3 +159,24 @@ WHERE ric.available_ingredients_count > 0
 ORDER BY match_percentage DESC, r.name
 LIMIT 20;
 
+-- create-comment: Inserts a new comment into the comments table
+INSERT INTO comments (id, recipe_id, author, content)
+VALUES ($1, $2, $3, $4)
+RETURNING id, recipe_id, author, content, created_at, updated_at;
+
+-- get-comments-by-recipe-id: Retrieves all comments for a given recipe_id, ordered chronologically
+SELECT id, recipe_id, author, content, created_at, updated_at
+FROM comments
+WHERE recipe_id = $1
+ORDER BY created_at ASC;
+
+-- update-comment: Updates the content of an existing comment
+UPDATE comments
+SET content = $1, updated_at = NOW()
+WHERE id = $2
+RETURNING id, recipe_id, author, content, created_at, updated_at;
+
+-- delete-comment: Deletes a comment by its ID
+DELETE FROM comments
+WHERE id = $1;
+
