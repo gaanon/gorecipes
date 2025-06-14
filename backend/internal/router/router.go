@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // SetupRouter initializes and returns a new Gin router.
@@ -75,6 +77,9 @@ func SetupRouter() *gin.Engine {
 			mealPlanner.DELETE("/entries/:entry_id", handlers.DeleteMealPlanEntryHandler) // DELETE /api/v1/mealplanner/entries/:entry_id
 		}
 	}
+
+	// Swagger UI route
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler, ginSwagger.URL("http://localhost:8080/swagger/doc.json")))
 
 	// Serve static files (uploaded images)
 	// The path "/uploads/images" will correspond to the "uploads/images" directory in the backend.

@@ -10,6 +10,12 @@ RUN go mod download && go mod verify
 # Copy the rest of the backend source code
 COPY . .
 
+# Install swag CLI
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
+# Generate Swagger documentation
+RUN swag init -dir . -generalInfo ./cmd/server/main.go
+
 # Build the application
 # CGO_ENABLED=0 for a static binary, GOOS=linux for Linux compatibility
 # -a installs all packages that are dependencies of the build
@@ -25,6 +31,8 @@ WORKDIR /app
 
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/gorecipes-backend /app/gorecipes-backend
+# Copy generated Swagger docs
+COPY --from=builder /app/docs /app/docs
 
 # Copy schema and seed data SQL files from the builder stage
 COPY --from=builder /app/internal/database/schema.sql /app/internal/database/schema.sql

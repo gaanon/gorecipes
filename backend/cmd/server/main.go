@@ -1,3 +1,14 @@
+// @title GoRecipes API
+// @version 1.0
+// @description This is the API documentation for the GoRecipes application.
+// @host localhost:8080
+// @BasePath /api/v1
+// @schemes http https
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name Authorization
+// @externalDocs.description OpenAPI
+// @externalDocs.url https://swagger.io/resources/open-api/
 package main
 
 import (
@@ -9,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "gorecipes/backend/docs" // Import generated docs
 	"gorecipes/backend/internal/database"
 	"gorecipes/backend/internal/router"
 )

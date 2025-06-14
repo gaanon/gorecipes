@@ -13,7 +13,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// CreateCommentHandler handles POST requests to create a new comment.
+// @Summary Create a new comment for a recipe
+// @Description Create a new comment for a specific recipe by its ID.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Param id path string true "Recipe ID"
+// @Param comment body models.Comment true "Comment object"
+// @Success 201 {object} models.Comment "Comment created successfully"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes/{id}/comments [post]
 func CreateCommentHandler(c *gin.Context) {
 	recipeID := c.Param("id")
 	if recipeID == "" {
@@ -58,7 +68,16 @@ func CreateCommentHandler(c *gin.Context) {
 	c.JSON(http.StatusCreated, createdComment)
 }
 
-// GetCommentsByRecipeIDHandler handles GET requests to retrieve all comments for a specific recipe.
+// @Summary Get comments for a recipe
+// @Description Get all comments associated with a specific recipe ID.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Param id path string true "Recipe ID"
+// @Success 200 {array} models.Comment "Successfully retrieved comments"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes/{id}/comments [get]
 func GetCommentsByRecipeIDHandler(c *gin.Context) {
 	recipeID := c.Param("id")
 	if recipeID == "" {
@@ -80,7 +99,18 @@ func GetCommentsByRecipeIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, comments)
 }
 
-// UpdateCommentHandler handles PUT requests to update an existing comment.
+// @Summary Update an existing comment
+// @Description Update the content of an existing comment by its ID.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Param id path string true "Comment ID"
+// @Param comment body object{content=string} true "Comment content to update"
+// @Success 200 {object} models.Comment "Comment updated successfully"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 404 {object} map[string]string "Comment not found"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /comments/{id} [put]
 func UpdateCommentHandler(c *gin.Context) {
 	commentID := c.Param("id")
 	if commentID == "" {
@@ -128,7 +158,16 @@ func UpdateCommentHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, updatedComment)
 }
 
-// DeleteCommentHandler handles DELETE requests to delete a comment.
+// @Summary Delete a comment
+// @Description Delete a comment by its unique ID.
+// @Tags comments
+// @Accept json
+// @Produce json
+// @Param id path string true "Comment ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /comments/{id} [delete]
 func DeleteCommentHandler(c *gin.Context) {
 	commentID := c.Param("id")
 	if commentID == "" {

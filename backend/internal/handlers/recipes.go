@@ -311,8 +311,19 @@ func extractFilterableNames(fullIngredient string) []string {
 	return result
 }
 
-// CreateRecipe handles the creation of a new recipe.
-// POST /api/v1/recipes - expects multipart/form-data
+// @Summary Create a new recipe
+// @Description Create a new recipe with name, method, ingredients, and an optional photo.
+// @Tags recipes
+// @Accept multipart/form-data
+// @Produce json
+// @Param name formData string true "Name of the recipe"
+// @Param method formData string true "Cooking method"
+// @Param ingredients formData string false "Comma-separated list of ingredients"
+// @Param photo formData file false "Recipe photo"
+// @Success 201 {object} models.Recipe "Recipe created successfully"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes [post]
 func CreateRecipe(c *gin.Context) {
 	var recipe models.Recipe
 	// Generate ID in handler for use in photo filename generation before DB call.
@@ -422,8 +433,18 @@ type PaginatedRecipesResponse struct {
 	TotalPages   int             `json:"total_pages"`
 }
 
-// ListRecipes handles listing recipes with pagination and filtering.
-// GET /api/v1/recipes?page=1&limit=25&tags=chicken,rice&search=curry
+// @Summary List all recipes
+// @Description Get a paginated list of all recipes, with optional search and ingredient filtering.
+// @Tags recipes
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Number of items per page" default(25)
+// @Param search query string false "Search term for recipe name or method"
+// @Param tags query string false "Comma-separated list of ingredient tags to filter by"
+// @Success 200 {object} PaginatedRecipesResponse "Successfully retrieved recipes"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes [get]
 func ListRecipes(c *gin.Context) {
 	// Parse query parameters for pagination
 	pageStr := c.DefaultQuery("page", "1")
@@ -513,8 +534,17 @@ func containsAnyTag(recipeID string, recipeIngredients []string, filterTags []st
 	return false
 }
 
-// GetRecipe handles fetching a single recipe by ID.
-// GET /api/v1/recipes/:id
+// @Summary Get a recipe by ID
+// @Description Get a single recipe by its unique ID.
+// @Tags recipes
+// @Accept json
+// @Produce json
+// @Param id path string true "Recipe ID"
+// @Success 200 {object} models.Recipe "Successfully retrieved recipe"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 404 {object} map[string]string "Recipe not found"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes/{id} [get]
 func GetRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
 
@@ -544,8 +574,21 @@ func GetRecipe(c *gin.Context) {
 	c.JSON(http.StatusOK, recipe)
 }
 
-// UpdateRecipe handles updating an existing recipe.
-// PUT /api/v1/recipes/:id - expects multipart/form-data
+// @Summary Update an existing recipe
+// @Description Update an existing recipe by its ID with new name, method, ingredients, and optional photo.
+// @Tags recipes
+// @Accept multipart/form-data
+// @Produce json
+// @Param id path string true "Recipe ID"
+// @Param name formData string true "Name of the recipe"
+// @Param method formData string true "Cooking method"
+// @Param ingredients formData string false "Comma-separated list of ingredients"
+// @Param photo formData file false "New recipe photo"
+// @Success 200 {object} models.Recipe "Recipe updated successfully"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 404 {object} map[string]string "Recipe not found"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes/{id} [put]
 func UpdateRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
 	if recipeID == "" {
@@ -666,8 +709,16 @@ func UpdateRecipe(c *gin.Context) {
 	c.JSON(http.StatusOK, updatedRecipe)
 }
 
-// DeleteRecipe handles deleting a recipe by ID.
-// DELETE /api/v1/recipes/:id
+// @Summary Delete a recipe
+// @Description Delete a recipe by its unique ID.
+// @Tags recipes
+// @Accept json
+// @Produce json
+// @Param id path string true "Recipe ID"
+// @Success 204 "No Content"
+// @Failure 400 {object} map[string]string "Bad Request"
+// @Failure 500 {object} map[string]string "Internal Server Error"
+// @Router /recipes/{id} [delete]
 func DeleteRecipe(c *gin.Context) {
 	recipeID := c.Param("id")
 	if recipeID == "" {
