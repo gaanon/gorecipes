@@ -7,7 +7,6 @@ This directory contains the PostgreSQL database schema and related files for the
 - `schema.sql` - Complete database schema with all tables, indexes, functions, and views
 - `migrations/001_initial_schema.sql` - Initial migration to create the schema
 - `migrations/001_initial_schema_down.sql` - Rollback migration
-- `seed_data.sql` - Sample data for development and testing
 - `queries.sql` - Common SQL queries that will be used in the Go application
 
 ## Database Design
@@ -100,7 +99,6 @@ See `queries.sql` for common query patterns that will be implemented in the Go a
 ## Development Setup
 
 1. Run the initial migration: `psql -f migrations/001_initial_schema.sql`
-2. Load seed data: `psql -f seed_data.sql`
 3. Test queries: Use examples from `queries.sql`
 
 ## Rollback

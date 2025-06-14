@@ -7,9 +7,6 @@ import (
 	"io/ioutil" // For ReadFile, or use os.ReadFile in Go 1.16+
 	"log"
 	"os" // Required for os.ReadFile if using Go 1.16+ and os.Getenv
-	"path/filepath"
-	"strconv" // For parsing boolean from env var
-	"strings" // For parsing boolean from env var (strings.ToLower)
 	"time"
 
 	_ "github.com/lib/pq" // PostgreSQL driver
@@ -104,42 +101,3 @@ func executeSQLFile(db *sql.DB, filePath string, stepName string) error {
 	log.Printf("%s executed successfully from %s.", stepName, filePath)
 	return nil
 }
-
-// SeedData applies the schema and then seeds data if the respective files exist.
-func SeedData(db *sql.DB) error {
-	schemaFilePath := filepath.Join("internal", "database", "schema.sql")   // Relative to backend directory
-	seedFilePath := filepath.Join("internal", "database", "seed_data.sql") // Relative to backend directory
-
-	// Step 1: Apply schema
-	err := executeSQLFile(db, schemaFilePath, "schema")
-	if err != nil {
-		log.Printf("Error applying schema, seeding will be skipped: %v", err)
-		// Decide if this should be a fatal error for the app or just a warning
-		return nil // For now, let the app continue even if schema fails, but log it prominently
-	}
-
-	// Step 2: Conditionally Seed data
-	enableSeedingStr := os.Getenv("GORECIPES_ENABLE_SEED_DATA")
-	enableSeeding, _ := strconv.ParseBool(strings.ToLower(enableSeedingStr)) // Defaults to false if parsing fails or var is empty/not "true"/"1"
-
-	if enableSeeding {
-		log.Println("GORECIPES_ENABLE_SEED_DATA is true. Proceeding with data seeding.")
-		err = executeSQLFile(db, seedFilePath, "seed data")
-		if err != nil {
-			log.Printf("Error seeding data: %v", err)
-			// Decide if this should be a fatal error for the app or just a warning
-			return nil // For now, let the app continue even if seeding fails
-		}
-		log.Println("Database initialization (schema and seeding) complete.")
-	} else {
-		log.Printf("GORECIPES_ENABLE_SEED_DATA is not 'true' (value: '%s'). Skipping data seeding.", enableSeedingStr)
-		log.Println("Database initialization (schema application only) complete.")
-	}
-
-	return nil
-}
-
-
-
-
-

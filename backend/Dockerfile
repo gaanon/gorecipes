@@ -28,7 +28,6 @@ COPY --from=builder /app/gorecipes-backend /app/gorecipes-backend
 
 # Copy schema and seed data SQL files from the builder stage
 COPY --from=builder /app/internal/database/schema.sql /app/internal/database/schema.sql
-COPY --from=builder /app/internal/database/seed_data.sql /app/internal/database/seed_data.sql
 
 # The application needs a directory for BadgerDB data and uploaded images.
 # These paths should correspond to where Docker volumes will be mounted.

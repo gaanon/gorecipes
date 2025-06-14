@@ -20,7 +20,7 @@ func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Println("WARNING: DATABASE_URL environment variable not set. Using default development URL.")
-		// This is an example default for local development. 
+		// This is an example default for local development.
 		// Ensure your PostgreSQL server is running and accessible with these credentials.
 		dbURL = "postgres://postgres:password@localhost:5432/gorecipes_dev?sslmode=disable"
 		log.Printf("Using default DATABASE_URL: %s (Ensure this is correctly configured for your environment)", dbURL)
@@ -32,10 +32,6 @@ func main() {
 	}
 
 	// Seed the database with sample data
-	if err := database.SeedData(database.DB); err != nil {
-		log.Printf("Warning: Failed to seed database: %v. Continuing without seeded data.", err)
-		// Depending on requirements, you might want to log.Fatalf here if seeding is critical
-	}
 
 	// defer database.CloseDB() // Will call this explicitly on shutdown
 
