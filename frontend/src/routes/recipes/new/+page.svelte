@@ -116,8 +116,8 @@
 
 		<div class="form-group">
 			<label for="ingredients" class="form-label">Ingredients:</label>
-			<input type="text" id="ingredients" class="form-input" bind:value={ingredientsStr} placeholder="e.g., 1 cup flour, 2 eggs, 1 tsp sugar" />
-			<small class="form-hint">Comma-separated, please!</small>
+			<textarea id="ingredients" class="form-textarea" bind:value={ingredientsStr} rows="6"></textarea>
+			<small class="form-hint">Enter one ingredient per line.</small>
 		</div>
 
 		<div class="form-group">

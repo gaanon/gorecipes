@@ -318,7 +318,7 @@ func extractFilterableNames(fullIngredient string) []string {
 // @Produce json
 // @Param name formData string true "Name of the recipe"
 // @Param method formData string true "Cooking method"
-// @Param ingredients formData string false "Comma-separated list of ingredients"
+// @Param ingredients formData string false "Newline-separated list of ingredients"
 // @Param photo formData file false "Recipe photo"
 // @Success 201 {object} models.Recipe "Recipe created successfully"
 // @Failure 400 {object} map[string]string "Bad Request"
@@ -346,7 +346,7 @@ func CreateRecipe(c *gin.Context) {
 	// Process ingredients from comma-separated string to []string
 	recipe.Ingredients = []string{}
 	if ingredientsStr != "" {
-		rawIngredients := strings.Split(ingredientsStr, ",")
+		rawIngredients := strings.Split(ingredientsStr, "\n")
 		uniqueIngredients := make(map[string]bool)
 		for _, ing := range rawIngredients {
 			trimmedIng := strings.TrimSpace(ing)
@@ -582,7 +582,7 @@ func GetRecipe(c *gin.Context) {
 // @Param id path string true "Recipe ID"
 // @Param name formData string true "Name of the recipe"
 // @Param method formData string true "Cooking method"
-// @Param ingredients formData string false "Comma-separated list of ingredients"
+// @Param ingredients formData string false "Newline-separated list of ingredients"
 // @Param photo formData file false "New recipe photo"
 // @Success 200 {object} models.Recipe "Recipe updated successfully"
 // @Failure 400 {object} map[string]string "Bad Request"
@@ -629,7 +629,7 @@ func UpdateRecipe(c *gin.Context) {
 	// Process ingredients
 	var updatedIngredients []string
 	if ingredientsStr != "" {
-		rawIngredients := strings.Split(ingredientsStr, ",")
+		rawIngredients := strings.Split(ingredientsStr, "\n")
 		for _, ing := range rawIngredients {
 			trimmedIng := strings.TrimSpace(ing)
 			if trimmedIng != "" {
