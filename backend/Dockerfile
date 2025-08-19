@@ -29,24 +29,20 @@ FROM alpine:latest
 
 WORKDIR /app
 
-# Copy the compiled binary from the builder stage
-COPY --from=builder /app/gorecipes-backend /app/gorecipes-backend
-# Copy generated Swagger docs
-COPY --from=builder /app/docs /app/docs
+# Install CA certificates for HTTPS requests (needed for external API calls)
+RUN apk --no-cache add ca-certificates
 
-# Copy schema and seed data SQL files from the builder stage
-COPY --from=builder /app/internal/database/schema.sql /app/internal/database/schema.sql
+# Copy the binary from the builder stage
+COPY --from=builder /app/gorecipes-backend .
 
-# The application needs a directory for BadgerDB data and uploaded images.
-# These paths should correspond to where Docker volumes will be mounted.
-# The application currently uses "data/badger" and "uploads/images" relative to its execution path.
-# We don't strictly need to create them here if volumes are mounted,
-# but it's good practice for clarity and if run without volumes initially.
-RUN mkdir -p /app/data/badger /app/uploads/images && \
-    chown -R nobody:nogroup /app/data /app/uploads && \
-    chmod -R 770 /app/data /app/uploads 
-# Consider using a non-root user for added security
-# USER nobody:nogroup # Or a dedicated app user
+# Create necessary directories and set proper permissions
+RUN mkdir -p /app/uploads/images && \
+    mkdir -p /app/data && \
+    chown -R 1000:1000 /app/uploads /app/data && \
+    chmod -R 775 /app/uploads /app/data
+
+# Switch to a non-root user for security
+USER 1000
 
 # Expose the port the backend listens on (default 8080)
 EXPOSE 8080

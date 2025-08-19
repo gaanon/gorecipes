@@ -5,6 +5,8 @@
 	import type { Recipe, PaginatedRecipesResponse } from '$lib/types';
 	import RecipeCard from '$lib/components/RecipeCard.svelte';
 	import MealPlannerPanel from '$lib/components/MealPlannerPanel.svelte'; // Added
+	import RecipePhotoUploader from '$lib/components/RecipePhotoUploader.svelte';
+	import { PhotoIcon } from '@heroicons/vue/24/outline';
 
 	export let data: PageData;
 
@@ -14,6 +16,7 @@
 	let isLoadingMore = false;
 	let filterTagsInput = data.currentTags || '';
 	let isPlannerVisible = false; // Added for planner visibility
+	let showPhotoUploader = false;
 
 	// Initialize displayedRecipes when data first loads or changes significantly (e.g., filter applied)
 	$: {
@@ -75,6 +78,17 @@
 	// $: console.log('Data from load:', data);
 	// $: console.log('Displayed Recipes:', displayedRecipes.length, 'Current Page:', currentPage);
 
+	function handleRecipeProcessed(event) {
+		const recipeData = event.detail;
+		// Navigate to the new recipe page with the extracted data
+		const queryParams = new URLSearchParams({
+			name: recipeData.name,
+			method: recipeData.method,
+			ingredients: recipeData.ingredients.join('\n')
+		});
+		
+		goto(`/recipes/new?${queryParams.toString()}`);
+	}
 </script>
 
 <svelte:head>
@@ -88,6 +102,10 @@
 		{/if}
 		<button class="button planner-toggle-button" on:click={() => isPlannerVisible = !isPlannerVisible}>
 			{isPlannerVisible ? 'Hide' : 'Show'} Planner
+		</button>
+		<button class="button primary" on:click={() => showPhotoUploader = true}>
+			<PhotoIcon class="icon" />
+			Upload Photo
 		</button>
 	</div>
 
@@ -146,6 +164,11 @@
 
 <MealPlannerPanel bind:isVisible={isPlannerVisible} />
 
+<RecipePhotoUploader
+  bind:isOpen={showPhotoUploader}
+  on:recipeProcessed={handleRecipeProcessed}
+/>
+
 <style>
 	/* .page-container is now .main-container from app.css */
 
@@ -176,6 +199,11 @@
 	}
 	.planner-toggle-button:hover {
 		background-color: #e68a00; /* Darker accent */
+	}
+	.icon {
+		width: 18px;
+		height: 18px;
+		margin-right: 8px;
 	}
 
 

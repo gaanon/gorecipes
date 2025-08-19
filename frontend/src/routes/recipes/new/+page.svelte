@@ -1,16 +1,32 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
+	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
 	import type { ActionResult } from '@sveltejs/kit';
-	import type { Recipe } from '$lib/types'; // For potential response typing
+	import type { Recipe } from '$lib/types';
 
 	let recipeName = '';
-	let ingredientsStr = ''; // Comma-separated string for simplicity
+	let ingredientsStr = ''; // Newline-separated string for ingredients
 	let method = '';
 	let photoFile: FileList | null = null;
 	let isLoading = false;
 	let formError: string | null = null;
 	let formSuccess: string | null = null;
+
+	// Check for URL parameters to pre-fill the form
+	onMount(() => {
+		const urlParams = new URLSearchParams(window.location.search);
+		if (urlParams.has('name')) {
+			recipeName = urlParams.get('name') || '';
+		}
+		if (urlParams.has('ingredients')) {
+			ingredientsStr = urlParams.get('ingredients') || '';
+		}
+		if (urlParams.has('method')) {
+			method = urlParams.get('method') || '';
+		}
+	});
 
 	// This function will be called after the form submission (if using progressive enhancement)
 	function handleResult(event: CustomEvent<ActionResult>) {
@@ -46,7 +62,22 @@
 </svelte:head>
 
 <div class="main-container form-page-container">
-	<h1 class="page-title">Craft a New Recipe</h1>
+	<h1 class="page-title">
+		{#if recipeName}
+			Edit "{recipeName}"
+		{:else}
+			Craft a New Recipe
+		{/if}
+	</h1>
+	
+	{#if recipeName}
+		<div class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+			<p class="text-sm text-blue-700">
+				✨ Recipe details were automatically extracted from your photo. 
+				Please review and make any necessary adjustments before saving.
+			</p>
+		</div>
+	{/if}
 
 	{#if formSuccess}
 		<div class="message success-message">

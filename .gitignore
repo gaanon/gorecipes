@@ -24,6 +24,7 @@ frontend/build/
 frontend/.env
 frontend/.env.*
 frontend/!/.env.example
+.env
 
 # Log files
 *.log

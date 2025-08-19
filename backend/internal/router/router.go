@@ -35,6 +35,7 @@ func SetupRouter() *gin.Engine {
 		{
 			recipesBase.POST("", handlers.CreateRecipe) // POST /api/v1/recipes
 			recipesBase.GET("", handlers.ListRecipes)   // GET  /api/v1/recipes
+			recipesBase.POST("/process-photo", handlers.ProcessRecipePhoto) // POST /api/v1/recipes/process-photo
 
 			// Routes for a specific recipe, e.g., /api/v1/recipes/:id
 			recipeWithID := recipesBase.Group("/:id")

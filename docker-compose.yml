@@ -9,10 +9,12 @@ services:
       - "8080:8080"
     environment:
       - PEXELS_API_KEY=${PEXELS_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DATABASE_URL=postgres://gorecipes_user:gorecipes_pass@postgres-db:5432/gorecipes_db?sslmode=disable
       - GORECIPES_ENABLE_SEED_DATA=true
+      - UPLOADS_DIR=/app/uploads
     volumes:
-      - gorecipes_uploads:/app/uploads/images # Named volume for uploaded images
+      - gorecipes_uploads:/app/uploads # Named volume for uploaded files
       # For local development, you might want to mount your source code
       # to see changes without rebuilding the image (if your Go setup supports hot reload or you restart manually)
       # - ./backend:/app # Be cautious with this in Go as it's a compiled language

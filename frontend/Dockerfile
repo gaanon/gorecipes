@@ -26,6 +26,16 @@ FROM nginx:stable-alpine
 # Remove default Nginx static assets
 RUN rm -rf /usr/share/nginx/html/*
 
+# Configure Nginx to handle large file uploads (for photo uploads)
+RUN { \
+    echo 'client_max_body_size 10M;'; \
+    echo 'client_body_timeout 60s;'; \
+    echo 'proxy_connect_timeout 300;'; \
+    echo 'proxy_send_timeout 300;'; \
+    echo 'proxy_read_timeout 300;'; \
+    echo 'send_timeout 300;'; \
+} > /etc/nginx/conf.d/custom.conf
+
 # Copy static assets from the builder stage
 # SvelteKit adapter-static usually outputs to 'build' directory
 COPY --from=builder /app/build /usr/share/nginx/html
