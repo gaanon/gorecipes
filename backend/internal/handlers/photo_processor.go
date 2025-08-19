@@ -38,6 +38,10 @@ type ProcessRecipePhotoResponse struct {
 func ProcessRecipePhoto(c *gin.Context) {
 	log.Println("\n=== ProcessRecipePhoto: Starting to process photo with Gemini ===")
 
+	if err := c.Request.ParseMultipartForm(10 << 20); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file too large"})
+		return
+	}
 	file, fileHeader, err := c.Request.FormFile("photo")
 	if err != nil {
 		errMsg := fmt.Sprintf("No file uploaded: %v", err)
