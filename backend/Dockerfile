@@ -34,6 +34,7 @@ RUN apk --no-cache add ca-certificates
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/gorecipes-backend .
+COPY ./internal/database ./internal/database
 
 # Create necessary directories and set proper permissions
 RUN mkdir -p /app/uploads/images && \

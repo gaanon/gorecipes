@@ -38,9 +38,18 @@ func main() {
 		log.Printf("Using default DATABASE_URL: %s (Ensure this is correctly configured for your environment)", dbURL)
 	}
 
-	// Initialize Database
-	if err := database.InitPostgreSQLDB(dbURL); err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
+	// Initialize Database with retry logic
+	var dbErr error
+	for i := 0; i < 5; i++ {
+		dbErr = database.InitPostgreSQLDB(dbURL)
+		if dbErr == nil {
+			break // Success
+		}
+		log.Printf("Failed to initialize database (attempt %d/5): %v. Retrying in 5 seconds...", i+1, dbErr)
+		time.Sleep(5 * time.Second)
+	}
+	if dbErr != nil {
+		log.Fatalf("Failed to initialize database after several attempts: %v", dbErr)
 	}
 
 	// Seed the database with sample data
