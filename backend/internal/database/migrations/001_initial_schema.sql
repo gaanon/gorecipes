@@ -20,6 +20,7 @@ CREATE TABLE ingredients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL UNIQUE,
     normalized_name VARCHAR(255) NOT NULL,
+    normalized_name_tsvector TSVECTOR,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -51,6 +52,7 @@ CREATE INDEX idx_recipes_updated_at ON recipes(updated_at DESC);
 CREATE INDEX idx_ingredients_name ON ingredients(name);
 CREATE INDEX idx_ingredients_normalized_name ON ingredients(normalized_name);
 CREATE INDEX idx_ingredients_name_gin ON ingredients USING GIN (to_tsvector('english', name));
+CREATE INDEX idx_ingredients_normalized_name_tsvector ON ingredients USING GIN(normalized_name_tsvector);
 
 CREATE INDEX idx_recipe_ingredients_recipe_id ON recipe_ingredients(recipe_id);
 CREATE INDEX idx_recipe_ingredients_ingredient_id ON recipe_ingredients(ingredient_id);
@@ -87,6 +89,7 @@ CREATE OR REPLACE FUNCTION set_normalized_ingredient_name()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.normalized_name = normalize_ingredient_name(NEW.name);
+    NEW.normalized_name_tsvector = to_tsvector('english', NEW.normalized_name);
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
