@@ -1,4 +1,27 @@
 services:
+  db-migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: "gaanon/gorecipes-db-migrator:local"
+    container_name: gorecipes-db-migrator-dev
+    command: >
+      sh -c "
+        echo 'Waiting for PostgreSQL to be ready...' &&
+        while ! nc -z postgres-db 5432; do
+          sleep 1;
+        done;
+        echo 'PostgreSQL is ready, running migrations...' &&
+        /app/gorecipes-backend -mode=migrate
+      "
+    environment:
+      - DATABASE_URL=postgres://gorecipes_user:gorecipes_pass@postgres-db:5432/gorecipes_db?sslmode=disable
+    restart: on-failure
+    depends_on:
+      - postgres-db
+    networks:
+      - gorecipes-net
+
   backend:
     build:
       context: ./backend
@@ -20,7 +43,8 @@ services:
       # - ./backend:/app # Be cautious with this in Go as it's a compiled language
     restart: unless-stopped
     depends_on:
-      - postgres-db
+      db-migrator:
+        condition: service_completed_successfully
     networks:
       - gorecipes-net
 
