@@ -30,7 +30,7 @@ FROM alpine:latest
 WORKDIR /app
 
 # Install CA certificates for HTTPS requests (needed for external API calls)
-RUN apk --no-cache add ca-certificates netcat-openbsd
+RUN apk --no-cache add ca-certificates
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/gorecipes-backend .

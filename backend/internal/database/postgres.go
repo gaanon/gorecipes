@@ -46,6 +46,18 @@ func InitPostgreSQLDB(connectionString string) error {
 	}
 
 	log.Println("PostgreSQL database connected successfully.")
+
+	// Run migrations
+	migrationsPath := "./internal/database/migrations/"
+	if err := executeSQLFile(DB, migrationsPath+"001_initial_schema.sql", "initial schema"); err != nil {
+		log.Printf("Could not apply initial schema migration: %v", err)
+		// Depending on the desired behavior, you might want to return this error
+	}
+	if err := executeSQLFile(DB, migrationsPath+"20250613162217_create_comments_table.sql", "comments table migration"); err != nil {
+		log.Printf("Could not apply comments table migration: %v", err)
+		// Depending on the desired behavior, you might want to return this error
+	}
+
 	return nil
 }
 
