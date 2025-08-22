@@ -20,7 +20,8 @@ CREATE TABLE ingredients (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL UNIQUE,
     normalized_name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
 -- Create recipe_ingredients junction table
@@ -92,6 +93,9 @@ $$ LANGUAGE plpgsql;
 
 -- Create triggers
 CREATE TRIGGER update_recipes_updated_at BEFORE UPDATE ON recipes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_ingredients_updated_at BEFORE UPDATE ON ingredients
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER trigger_set_normalized_ingredient_name
